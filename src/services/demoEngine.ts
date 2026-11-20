@@ -5,6 +5,7 @@ import { resolveMovement } from '../engine/movementEngine';
 import { generateQuestion, pickBalancedOperation } from '../engine/questionGenerator';
 import { calculatePlayerScore } from '../engine/scoringEngine';
 import type {
+  AnswerSubmission,
   BoardConfiguration,
   GameSettings,
   Player,
@@ -15,14 +16,22 @@ import type {
   SecretAnswerKey,
 } from '../types/game';
 
+export interface DemoHumanAnswerRecord {
+  submittedAnswer: number;
+  isCorrect: boolean;
+  correctAnswer: number;
+  submittedAtMs: number;
+  responseTimeMs: number;
+}
+
 export interface DemoSessionState {
   room: Room;
   players: Player[];
   rounds: Round[];
-  activeSecrets: Record<string, SecretAnswerKey>;
-  humanSubmittedAnswer: number | null;
-  humanSubmittedAtMs: number | null;
-  botAnswers: Record<string, { answer: number; timeMs: number }>;
+  humanCurrentRound: number;
+  secretsByRound: Record<number, Record<string, SecretAnswerKey>>;
+  humanAnswersByRound: Record<number, DemoHumanAnswerRecord>;
+  botAnswersByRound: Record<number, Record<string, { answer: number; timeMs: number }>>;
   eventsFeed: RoundEvent[];
 }
 
@@ -117,12 +126,81 @@ export function createInitialDemoSession(
     room,
     players,
     rounds: [],
-    activeSecrets: {},
-    humanSubmittedAnswer: null,
-    humanSubmittedAtMs: null,
-    botAnswers: {},
+    humanCurrentRound: 1,
+    secretsByRound: {},
+    humanAnswersByRound: {},
+    botAnswersByRound: {},
     eventsFeed: [],
   };
+}
+
+function buildPlayerRoundEntry(
+  player: Player,
+  roundNum: number,
+  playerOffset: number,
+  room: Room,
+  usedPrompts: Set<string>
+): { dice: number; publicQuestion: PublicQuestion; secretKey: SecretAnswerKey } {
+  const dice = rollDice(room.settings.diceMode, player.doubleDiceNext);
+  const isChallenge = room.boardConfiguration.specialTiles[String(player.position)] === 'CHALLENGE';
+  const opHint = pickBalancedOperation(room.settings.operations, roundNum + playerOffset);
+  const { publicQuestion, secretKey } = generateQuestion(room.settings, {
+    operationHint: opHint,
+    usedPrompts,
+    isChallenge,
+  });
+  return { dice, publicQuestion, secretKey };
+}
+
+function ensureRoundForHuman(
+  state: DemoSessionState,
+  roundNum: number,
+  humanPlayer: Player,
+  usedPrompts: Set<string>
+): { rounds: Round[]; secretsByRound: Record<number, Record<string, SecretAnswerKey>> } {
+  if (roundNum > state.room.settings.totalRounds || humanPlayer.finished) {
+    return { rounds: state.rounds, secretsByRound: state.secretsByRound };
+  }
+
+  const existingIdx = state.rounds.findIndex((r) => r.roundNumber === roundNum);
+  const existingRound = existingIdx >= 0 ? state.rounds[existingIdx] : null;
+  if (existingRound && existingRound.questions[DEMO_HUMAN_ID]) {
+    return { rounds: state.rounds, secretsByRound: state.secretsByRound };
+  }
+
+  const entry = buildPlayerRoundEntry(humanPlayer, roundNum, 0, state.room, usedPrompts);
+  const now = Date.now();
+
+  const updatedRound: Round = existingRound
+    ? {
+        ...existingRound,
+        diceResults: { ...existingRound.diceResults, [DEMO_HUMAN_ID]: entry.dice },
+        questions: { ...existingRound.questions, [DEMO_HUMAN_ID]: entry.publicQuestion },
+      }
+    : {
+        roundNumber: roundNum,
+        roomId: state.room.roomCode,
+        status: 'ACTIVE',
+        startedAt: now,
+        deadlineAt: now + state.room.settings.answerTimerSec * 1000,
+        diceResults: { [DEMO_HUMAN_ID]: entry.dice },
+        questions: { [DEMO_HUMAN_ID]: entry.publicQuestion },
+      };
+
+  const nextRounds =
+    existingIdx >= 0
+      ? state.rounds.map((r, i) => (i === existingIdx ? updatedRound : r))
+      : [...state.rounds, updatedRound].sort((a, b) => a.roundNumber - b.roundNumber);
+
+  const nextSecrets = {
+    ...state.secretsByRound,
+    [roundNum]: {
+      ...(state.secretsByRound[roundNum] ?? {}),
+      [DEMO_HUMAN_ID]: entry.secretKey,
+    },
+  };
+
+  return { rounds: nextRounds, secretsByRound: nextSecrets };
 }
 
 export function startDemoRound(state: DemoSessionState, usedPrompts: Set<string>): DemoSessionState {
@@ -135,24 +213,27 @@ export function startDemoRound(state: DemoSessionState, usedPrompts: Set<string>
     };
   }
 
-  const diceResults: Record<string, number> = {};
-  const questions: Record<string, PublicQuestion> = {};
-  const activeSecrets: Record<string, SecretAnswerKey> = {};
-  const botAnswers: Record<string, { answer: number; timeMs: number }> = {};
+  const existingIdx = state.rounds.findIndex((r) => r.roundNumber === nextNum);
+  const existingRound = existingIdx >= 0 ? state.rounds[existingIdx] : null;
+
+  const diceResults: Record<string, number> = { ...(existingRound?.diceResults ?? {}) };
+  const questions: Record<string, PublicQuestion> = { ...(existingRound?.questions ?? {}) };
+  const roundSecrets: Record<string, SecretAnswerKey> = { ...(state.secretsByRound[nextNum] ?? {}) };
+  const botAnswers: Record<string, { answer: number; timeMs: number }> = {
+    ...(state.botAnswersByRound[nextNum] ?? {}),
+  };
 
   activePlayers.forEach((player, idx) => {
-    diceResults[player.playerId] = rollDice(state.room.settings.diceMode, player.doubleDiceNext);
-    const isChallenge = state.room.boardConfiguration.specialTiles[String(player.position)] === 'CHALLENGE';
-    const opHint = pickBalancedOperation(state.room.settings.operations, nextNum + idx);
-    const { publicQuestion, secretKey } = generateQuestion(state.room.settings, {
-      operationHint: opHint,
-      usedPrompts,
-      isChallenge,
-    });
-    questions[player.playerId] = publicQuestion;
-    activeSecrets[player.playerId] = secretKey;
+    if (!questions[player.playerId] || !roundSecrets[player.playerId]) {
+      const entry = buildPlayerRoundEntry(player, nextNum, idx, state.room, usedPrompts);
+      diceResults[player.playerId] = entry.dice;
+      questions[player.playerId] = entry.publicQuestion;
+      roundSecrets[player.playerId] = entry.secretKey;
+    }
 
-    if (player.playerId !== DEMO_HUMAN_ID) {
+    if (player.playerId !== DEMO_HUMAN_ID && !botAnswers[player.playerId]) {
+      const secretKey = roundSecrets[player.playerId];
+      const publicQuestion = questions[player.playerId];
       const profile = DEMO_BOT_PROFILES.find((b) => b.id === player.playerId);
       const skill = profile?.skill ?? 0.72;
       const roll = Math.random();
@@ -180,11 +261,16 @@ export function startDemoRound(state: DemoSessionState, usedPrompts: Set<string>
     roundNumber: nextNum,
     roomId: state.room.roomCode,
     status: 'ACTIVE',
-    startedAt: now,
+    startedAt: existingRound?.startedAt ?? now,
     deadlineAt: now + state.room.settings.answerTimerSec * 1000,
     diceResults,
     questions,
   };
+
+  const nextRounds =
+    existingIdx >= 0
+      ? state.rounds.map((r, i) => (i === existingIdx ? round : r))
+      : [...state.rounds, round].sort((a, b) => a.roundNumber - b.roundNumber);
 
   return {
     ...state,
@@ -194,19 +280,229 @@ export function startDemoRound(state: DemoSessionState, usedPrompts: Set<string>
       currentRound: nextNum,
       updatedAt: now,
     },
-    rounds: [...state.rounds, round],
-    activeSecrets,
-    humanSubmittedAnswer: null,
-    humanSubmittedAtMs: null,
-    botAnswers,
+    humanCurrentRound: state.room.currentRound === 0 ? 1 : state.humanCurrentRound,
+    rounds: nextRounds,
+    secretsByRound: {
+      ...state.secretsByRound,
+      [nextNum]: roundSecrets,
+    },
+    botAnswersByRound: {
+      ...state.botAnswersByRound,
+      [nextNum]: botAnswers,
+    },
+  };
+}
+
+export function submitAndGradeDemoHumanAnswer(
+  state: DemoSessionState,
+  roundNumber: number,
+  submittedAnswer: number,
+  usedPrompts: Set<string>
+): DemoSessionState {
+  if (state.humanAnswersByRound[roundNumber]) return state;
+
+  const round = state.rounds.find((r) => r.roundNumber === roundNumber);
+  const secret = state.secretsByRound[roundNumber]?.[DEMO_HUMAN_ID];
+  const human = state.players.find((p) => p.playerId === DEMO_HUMAN_ID);
+  if (!round || !secret || !human || human.finished) return state;
+
+  const now = Date.now();
+  const roundStartMs = typeof round.startedAt === 'number' ? round.startedAt : now - 2500;
+  const responseTimeMs = Math.max(250, now - roundStartMs);
+  const isCorrect = Math.round(submittedAnswer) === secret.correctAnswer;
+  const dice = round.diceResults[DEMO_HUMAN_ID] ?? 1;
+
+  const movement = resolveMovement({
+    currentPosition: human.position,
+    dice,
+    isCorrect,
+    isTimeout: false,
+    penalty: state.room.settings.wrongPenalty,
+    finishRule: state.room.settings.finishRule,
+    hasShield: human.shield,
+    board: state.room.boardConfiguration,
+    isChallengeRound: Boolean(secret.isChallenge),
+  });
+
+  const scoreDelta = calculatePlayerScore({
+    currentXp: human.xp,
+    currentGold: human.gold,
+    currentStreak: human.streak,
+    bestStreak: human.bestStreak,
+    correctAnswers: human.correctAnswers,
+    incorrectAnswers: human.incorrectAnswers,
+    timeoutCount: human.timeoutCount,
+    operationStats: human.operationStats,
+    negativeStats: human.negativeStats,
+    isCorrect,
+    isTimeout: false,
+    responseTimeMs,
+    operation: secret.operation,
+    hasNegative: secret.hasNegative,
+    specialTile: movement.specialTileTriggered,
+  });
+
+  const nextShield =
+    movement.specialTileTriggered === 'SHIELD'
+      ? true
+      : movement.shieldBlocked
+      ? false
+      : human.shield;
+
+  const nextDoubleDice = movement.specialTileTriggered === 'DOUBLE_DICE';
+
+  const updatedHuman: Player = {
+    ...human,
+    position: movement.finalPosition,
+    xp: scoreDelta.newXp,
+    level: scoreDelta.newLevel,
+    gold: scoreDelta.newGold,
+    correctAnswers: scoreDelta.newCorrect,
+    incorrectAnswers: scoreDelta.newIncorrect,
+    timeoutCount: scoreDelta.newTimeout,
+    streak: scoreDelta.newStreak,
+    bestStreak: scoreDelta.newBestStreak,
+    accuracy: scoreDelta.newAccuracy,
+    laddersClimbed: human.laddersClimbed + (movement.ladderTaken ? 1 : 0),
+    snakesEncountered: human.snakesEncountered + (movement.snakeTaken ? 1 : 0),
+    status: movement.finished ? 'FINISHED' : 'PLAYING',
+    finished: movement.finished,
+    finishedRound: movement.finished ? roundNumber : human.finishedRound,
+    shield: nextShield,
+    doubleDiceNext: nextDoubleDice,
+    operationStats: scoreDelta.newOperationStats,
+    negativeStats: scoreDelta.newNegativeStats,
+    lastOutcome: {
+      roundNumber,
+      dice,
+      submittedAnswer: Math.round(submittedAnswer),
+      correctAnswer: secret.correctAnswer,
+      isCorrect,
+      isTimeout: false,
+      fromPosition: movement.fromPosition,
+      toPosition: movement.finalPosition,
+      ladderTo: movement.ladderTaken?.end,
+      snakeTo: movement.snakeTaken?.end,
+      shieldBlocked: movement.shieldBlocked,
+      specialTileTriggered: movement.specialTileTriggered,
+      xpEarned: scoreDelta.xpEarned,
+      goldEarned: scoreDelta.goldEarned,
+      message: movement.feedbackMessage,
+    },
+  };
+
+  const newEvents: RoundEvent[] = [];
+  if (movement.finished) {
+    newEvents.push({
+      id: `d_${roundNumber}_${DEMO_HUMAN_ID}_fin`,
+      playerId: DEMO_HUMAN_ID,
+      playerName: human.displayName,
+      avatar: human.avatar,
+      type: 'FINISH',
+      text: `${human.displayName} mencapai petak ${state.room.boardConfiguration.boardSize} dan FINISH!`,
+      timestamp: now,
+    });
+  } else if (movement.ladderTaken) {
+    newEvents.push({
+      id: `d_${roundNumber}_${DEMO_HUMAN_ID}_lad`,
+      playerId: DEMO_HUMAN_ID,
+      playerName: human.displayName,
+      avatar: human.avatar,
+      type: 'LADDER',
+      text: `${human.displayName} naik tangga ${movement.ladderTaken.start} → ${movement.ladderTaken.end}!`,
+      timestamp: now,
+    });
+  } else if (movement.snakeTaken) {
+    newEvents.push({
+      id: `d_${roundNumber}_${DEMO_HUMAN_ID}_snk`,
+      playerId: DEMO_HUMAN_ID,
+      playerName: human.displayName,
+      avatar: human.avatar,
+      type: 'SNAKE',
+      text: `${human.displayName} turun ular ${movement.snakeTaken.start} → ${movement.snakeTaken.end}`,
+      timestamp: now,
+    });
+  } else if (isCorrect && movement.finalPosition > movement.fromPosition) {
+    newEvents.push({
+      id: `d_${roundNumber}_${DEMO_HUMAN_ID}_mov`,
+      playerId: DEMO_HUMAN_ID,
+      playerName: human.displayName,
+      avatar: human.avatar,
+      type: 'MOVE',
+      text: `${human.displayName} maju ke petak ${movement.finalPosition}`,
+      timestamp: now,
+    });
+  }
+
+  const nextPlayers = state.players.map((p) => (p.playerId === DEMO_HUMAN_ID ? updatedHuman : p));
+  const shouldEndFirstFinish = state.room.settings.gameEndRule === 'FIRST_FINISH' && movement.finished;
+
+  const { rounds: nextRounds, secretsByRound: nextSecrets } = ensureRoundForHuman(
+    state,
+    roundNumber + 1,
+    updatedHuman,
+    usedPrompts
+  );
+
+  return {
+    ...state,
+    room: shouldEndFirstFinish
+      ? { ...state.room, status: 'FINISHED', finishedAt: now }
+      : state.room,
+    players: nextPlayers,
+    rounds: nextRounds,
+    secretsByRound: nextSecrets,
+    humanAnswersByRound: {
+      ...state.humanAnswersByRound,
+      [roundNumber]: {
+        submittedAnswer: Math.round(submittedAnswer),
+        isCorrect,
+        correctAnswer: secret.correctAnswer,
+        submittedAtMs: now,
+        responseTimeMs,
+      },
+    },
+    eventsFeed: [...newEvents, ...state.eventsFeed].slice(0, 20),
+  };
+}
+
+export function advanceDemoHumanRound(state: DemoSessionState): DemoSessionState {
+  const nextRound = Math.min(state.room.settings.totalRounds, state.humanCurrentRound + 1);
+  return {
+    ...state,
+    humanCurrentRound: nextRound,
+  };
+}
+
+export function getDemoHumanAnswerSubmission(
+  state: DemoSessionState,
+  roundNumber: number
+): AnswerSubmission | null {
+  const rec = state.humanAnswersByRound[roundNumber];
+  if (!rec) return null;
+  return {
+    playerId: DEMO_HUMAN_ID,
+    teacherId: 'demo_teacher',
+    roomId: state.room.roomCode,
+    roundId: `round_${roundNumber}`,
+    submittedAnswer: rec.submittedAnswer,
+    isCorrect: rec.isCorrect,
+    correctAnswer: rec.correctAnswer,
+    responseTimeMs: rec.responseTimeMs,
+    submittedAt: rec.submittedAtMs,
   };
 }
 
 export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
-  const currentRound = state.rounds[state.rounds.length - 1];
+  const currentRoundNum = state.room.currentRound;
+  const roundIdx = state.rounds.findIndex((r) => r.roundNumber === currentRoundNum);
+  const currentRound = roundIdx >= 0 ? state.rounds[roundIdx] : null;
   if (!currentRound || currentRound.status === 'RESOLVED') return state;
 
   const roundStartMs = typeof currentRound.startedAt === 'number' ? currentRound.startedAt : Date.now() - 5000;
+  const roundSecrets = state.secretsByRound[currentRoundNum] ?? {};
+  const roundBotAnswers = state.botAnswersByRound[currentRoundNum] ?? {};
+
   let correctCount = 0;
   let incorrectCount = 0;
   let timeoutCount = 0;
@@ -221,22 +517,40 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
   let allFinishedNow = true;
 
   const updatedPlayers = state.players.map((player) => {
-    if (player.finished || player.status === 'REMOVED') return player;
-    const secret = state.activeSecrets[player.playerId];
-    if (!secret) return player;
+    const secret = roundSecrets[player.playerId];
+    if (!secret) {
+      if (!player.finished && player.status !== 'REMOVED') allFinishedNow = false;
+      return player;
+    }
+
     revealedAnswers[player.playerId] = secret.correctAnswer;
+
+    // If human already answered and was graded for this round, keep their graded stats and tally summary
+    if (player.playerId === DEMO_HUMAN_ID && state.humanAnswersByRound[currentRoundNum]) {
+      const hRec = state.humanAnswersByRound[currentRoundNum];
+      if (hRec.isCorrect) correctCount++;
+      else incorrectCount++;
+      if (!player.finished) allFinishedNow = false;
+      else if (player.finishedRound === currentRoundNum) {
+        finishedCount++;
+        newFinisherOccurred = true;
+      }
+      if (player.lastOutcome?.roundNumber === currentRoundNum) {
+        if (player.lastOutcome.toPosition !== player.lastOutcome.fromPosition) movedCount++;
+        if (player.lastOutcome.ladderTo) laddersClimbedCount++;
+        if (player.lastOutcome.snakeTo) snakesSlidCount++;
+      }
+      return player;
+    }
+
+    if (player.finished || player.status === 'REMOVED') return player;
 
     const dice = currentRound.diceResults[player.playerId] ?? 1;
     let submitted: number | null = null;
     let responseTimeMs = state.room.settings.answerTimerSec * 1000;
 
-    if (player.playerId === DEMO_HUMAN_ID) {
-      submitted = state.humanSubmittedAnswer;
-      if (state.humanSubmittedAtMs) {
-        responseTimeMs = Math.max(200, state.humanSubmittedAtMs - roundStartMs);
-      }
-    } else {
-      const botAns = state.botAnswers[player.playerId];
+    if (player.playerId !== DEMO_HUMAN_ID) {
+      const botAns = roundBotAnswers[player.playerId];
       if (botAns) {
         submitted = botAns.answer;
         responseTimeMs = botAns.timeMs;
@@ -301,7 +615,7 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
 
     if (movement.finished) {
       events.push({
-        id: `d_${currentRound.roundNumber}_${player.playerId}_fin`,
+        id: `d_${currentRoundNum}_${player.playerId}_fin`,
         playerId: player.playerId,
         playerName: player.displayName,
         avatar: player.avatar,
@@ -311,7 +625,7 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
       });
     } else if (movement.ladderTaken) {
       events.push({
-        id: `d_${currentRound.roundNumber}_${player.playerId}_lad`,
+        id: `d_${currentRoundNum}_${player.playerId}_lad`,
         playerId: player.playerId,
         playerName: player.displayName,
         avatar: player.avatar,
@@ -321,7 +635,7 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
       });
     } else if (movement.snakeTaken) {
       events.push({
-        id: `d_${currentRound.roundNumber}_${player.playerId}_snk`,
+        id: `d_${currentRoundNum}_${player.playerId}_snk`,
         playerId: player.playerId,
         playerName: player.displayName,
         avatar: player.avatar,
@@ -331,7 +645,7 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
       });
     } else if (isCorrect && movement.finalPosition > movement.fromPosition) {
       events.push({
-        id: `d_${currentRound.roundNumber}_${player.playerId}_mov`,
+        id: `d_${currentRoundNum}_${player.playerId}_mov`,
         playerId: player.playerId,
         playerName: player.displayName,
         avatar: player.avatar,
@@ -357,13 +671,13 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
       snakesEncountered: player.snakesEncountered + (movement.snakeTaken ? 1 : 0),
       status: movement.finished ? ('FINISHED' as const) : ('PLAYING' as const),
       finished: movement.finished,
-      finishedRound: movement.finished ? currentRound.roundNumber : player.finishedRound,
+      finishedRound: movement.finished ? currentRoundNum : player.finishedRound,
       shield: nextShield,
       doubleDiceNext: nextDoubleDice,
       operationStats: scoreDelta.newOperationStats,
       negativeStats: scoreDelta.newNegativeStats,
       lastOutcome: {
-        roundNumber: currentRound.roundNumber,
+        roundNumber: currentRoundNum,
         dice,
         submittedAnswer: submitted,
         correctAnswer: secret.correctAnswer,
@@ -386,7 +700,7 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
     ...currentRound,
     status: 'RESOLVED',
     resultSummary: {
-      roundNumber: currentRound.roundNumber,
+      roundNumber: currentRoundNum,
       correctCount,
       incorrectCount,
       timeoutCount,
@@ -400,11 +714,18 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
   };
 
   const previouslyFinished = state.players.some((p) => p.finished);
-  const reachedMaxRounds = currentRound.roundNumber >= state.room.settings.totalRounds;
+  const reachedMaxRounds = currentRoundNum >= state.room.settings.totalRounds;
   const shouldEnd =
     (state.room.settings.gameEndRule === 'FIRST_FINISH' && (newFinisherOccurred || previouslyFinished)) ||
     (state.room.settings.gameEndRule === 'ALL_FINISH' && allFinishedNow) ||
     reachedMaxRounds;
+
+  const nextRounds = state.rounds.map((r, idx) => (idx === roundIdx ? resolvedRound : r));
+  const humanPlayerAfter = updatedPlayers.find((p) => p.playerId === DEMO_HUMAN_ID);
+  const nextHumanRound =
+    humanPlayerAfter && !state.humanAnswersByRound[currentRoundNum] && !humanPlayerAfter.finished
+      ? Math.max(state.humanCurrentRound, currentRoundNum)
+      : state.humanCurrentRound;
 
   return {
     ...state,
@@ -413,8 +734,9 @@ export function resolveDemoRound(state: DemoSessionState): DemoSessionState {
       status: shouldEnd ? 'FINISHED' : state.room.status,
       finishedAt: shouldEnd ? Date.now() : state.room.finishedAt,
     },
+    humanCurrentRound: nextHumanRound,
     players: updatedPlayers,
-    rounds: [...state.rounds.slice(0, -1), resolvedRound],
+    rounds: nextRounds,
     eventsFeed: [...events, ...state.eventsFeed].slice(0, 20),
   };
 }

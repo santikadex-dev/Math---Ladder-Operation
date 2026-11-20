@@ -20,19 +20,24 @@ import { AVATARS } from '../constants/gameDefaults';
 import { generateBoardConfiguration } from '../engine/boardEngine';
 import {
   createRoom,
+  gradeSingleAnswer,
   removePlayerFromRoom,
   resolveCurrentRound,
   setRoomStatus,
   startNextRound,
+  subscribeAllRoomAnswers,
   subscribePlayers,
   subscribeRoom,
-  subscribeRoundAnswers,
   subscribeRounds,
   syncRoomPlayerCount,
   toggleRoomLock,
 } from '../services/roomService';
 import type { AnswerSubmission, Player, Room, Round } from '../types/game';
 import type { User } from 'firebase/auth';
+import { usePeriodicBoardRefresh } from '../hooks/usePeriodicBoardRefresh';
+import { startBgm, stopBgm } from '../utils/sound';
+import { BoardRefreshToolbar } from './BoardRefreshToolbar';
+import { FunnyEventTicker } from './FunnyEventTicker';
 import { GameBoard } from './GameBoard';
 import { LeaderboardPanel } from './LeaderboardPanel';
 import { ResultsAnalyticsScreen } from './ResultsAnalyticsScreen';
@@ -58,7 +63,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const [room, setRoom] = useState<Room | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
-  const [roundAnswers, setRoundAnswers] = useState<AnswerSubmission[]>([]);
+  const [allAnswers, setAllAnswers] = useState<AnswerSubmission[]>([]);
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [copiedCode, setCopiedCode] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
@@ -67,7 +72,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   const usedPromptsRef = useRef<Set<string>>(new Set());
   const resolvingRef = useRef<string | null>(null);
+  const gradingInFlightRef = useRef<Set<string>>(new Set());
   const autoAdvanceRef = useRef<number | null>(null);
+
+  const {
+    displayedPlayers,
+    intervalSec,
+    setIntervalSec,
+    formattedTime,
+    justRefreshed,
+    refreshNow,
+  } = usePeriodicBoardRefresh(players, 3);
 
   useEffect(() => {
     const unsubRoom = subscribeRoom(roomCode, setRoom);
@@ -79,6 +94,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       unsubRounds();
     };
   }, [roomCode]);
+
+  useEffect(() => {
+    if (room?.status === 'PLAYING') {
+      startBgm();
+    } else {
+      stopBgm();
+    }
+    return () => {
+      stopBgm();
+    };
+  }, [room?.status]);
 
   const activePlayers = useMemo(
     () => players.filter((p) => p.status !== 'REMOVED'),
@@ -93,17 +119,55 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   }, [room, activePlayers.length]);
 
-  const currentRound = rounds[rounds.length - 1] ?? null;
+  const currentRound = useMemo(() => {
+    if (!room || room.currentRound <= 0) return null;
+    return rounds.find((r) => r.roundNumber === room.currentRound) ?? null;
+  }, [rounds, room?.currentRound]);
+
   const currentRoundId = currentRound ? `round_${currentRound.roundNumber}` : null;
 
   useEffect(() => {
-    if (!room || !currentRoundId) {
-      setRoundAnswers([]);
+    if (!room) {
+      setAllAnswers([]);
       return;
     }
-    const unsub = subscribeRoundAnswers(room.roomCode, currentRoundId, room.teacherId, setRoundAnswers);
+    const unsub = subscribeAllRoomAnswers(room.roomCode, room.teacherId, setAllAnswers);
     return () => unsub();
-  }, [room?.roomCode, room?.teacherId, currentRoundId]);
+  }, [room?.roomCode, room?.teacherId]);
+
+  const roundAnswers = useMemo(
+    () => (currentRoundId ? allAnswers.filter((a) => a.roundId === currentRoundId) : []),
+    [allAnswers, currentRoundId]
+  );
+
+  // Immediately grade any student submission across any active round
+  useEffect(() => {
+    if (!room || room.status !== 'PLAYING') return;
+    const ungraded = allAnswers.filter(
+      (a) => a.roomId === room.roomCode && a.isCorrect === undefined
+    );
+    if (ungraded.length === 0) return;
+
+    ungraded.forEach((sub) => {
+      const key = `${sub.roundId}_${sub.playerId}`;
+      if (gradingInFlightRef.current.has(key)) return;
+      const roundNum = Number(sub.roundId.replace('round_', ''));
+      const targetRound = rounds.find((r) => r.roundNumber === roundNum);
+      const targetPlayer = players.find((p) => p.playerId === sub.playerId);
+      if (!targetRound || !targetPlayer) return;
+
+      gradingInFlightRef.current.add(key);
+      void gradeSingleAnswer({
+        room,
+        round: targetRound,
+        player: targetPlayer,
+        submission: sub,
+        usedPrompts: usedPromptsRef.current,
+      }).finally(() => {
+        gradingInFlightRef.current.delete(key);
+      });
+    });
+  }, [room, allAnswers, rounds, players]);
 
   // Countdown timer & automatic round resolution when timer expires or all unfinished players answered
   useEffect(() => {
@@ -416,6 +480,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-5 space-y-5">
+      <FunnyEventTicker players={players} rounds={rounds} />
       {/* Live Control Header */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 flex flex-wrap items-center justify-between gap-4">
         <div>
@@ -487,7 +552,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       {/* Main 2-Column Stage */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-          <GameBoard board={room.boardConfiguration} players={players} />
+          <BoardRefreshToolbar
+            intervalSec={intervalSec}
+            onChangeInterval={setIntervalSec}
+            formattedTime={formattedTime}
+            justRefreshed={justRefreshed}
+            onRefreshNow={refreshNow}
+          />
+          <GameBoard board={room.boardConfiguration} players={displayedPlayers} />
         </div>
 
         <div className="lg:col-span-5 space-y-5">

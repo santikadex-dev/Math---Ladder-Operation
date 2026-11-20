@@ -10,14 +10,21 @@ import {
   Square,
 } from 'lucide-react';
 import { generateBoardConfiguration } from '../engine/boardEngine';
+import { usePeriodicBoardRefresh } from '../hooks/usePeriodicBoardRefresh';
 import {
+  advanceDemoHumanRound,
   createInitialDemoSession,
   DEMO_HUMAN_ID,
+  getDemoHumanAnswerSubmission,
   resolveDemoRound,
   startDemoRound,
+  submitAndGradeDemoHumanAnswer,
   type DemoSessionState,
 } from '../services/demoEngine';
 import type { BoardConfiguration, GameSettings } from '../types/game';
+import { startBgm, stopBgm } from '../utils/sound';
+import { BoardRefreshToolbar } from './BoardRefreshToolbar';
+import { FunnyEventTicker } from './FunnyEventTicker';
 import { GameBoard } from './GameBoard';
 import { LeaderboardPanel } from './LeaderboardPanel';
 import { ProjectorBoardScreen } from './ProjectorBoardScreen';
@@ -47,10 +54,31 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
 
   const usedPromptsRef = useRef<Set<string>>(new Set());
 
-  const { room, players, rounds, humanSubmittedAnswer } = demoState;
-  const currentRound = rounds[rounds.length - 1] ?? null;
+  const { room, players, rounds, humanCurrentRound, humanAnswersByRound } = demoState;
+  const currentRound = rounds.find((r) => r.roundNumber === room.currentRound) ?? null;
 
-  // Countdown timer & auto-resolve in Demo Mode
+  const {
+    displayedPlayers,
+    intervalSec,
+    setIntervalSec,
+    formattedTime,
+    justRefreshed,
+    refreshNow,
+  } = usePeriodicBoardRefresh(players, 3);
+
+  // Manage BGM during Demo Mode gameplay
+  useEffect(() => {
+    if (room.status === 'PLAYING') {
+      startBgm();
+    } else {
+      stopBgm();
+    }
+    return () => {
+      stopBgm();
+    };
+  }, [room.status]);
+
+  // Countdown timer & bot-round resolution in Demo Mode
   useEffect(() => {
     if (!currentRound || currentRound.status !== 'ACTIVE' || room.status !== 'PLAYING') {
       setSecondsLeft(0);
@@ -69,21 +97,22 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
     return () => clearInterval(id);
   }, [currentRound?.roundNumber, currentRound?.status, currentRound?.deadlineAt, room.status]);
 
-  // Auto-resolve shortly after human submits answer (simulating bots finishing)
+  // Simulate bots finishing their round within ~6s after human answered so board race stays lively
+  const humanAnsweredCurrentClassroomRound = Boolean(humanAnswersByRound[room.currentRound]);
   useEffect(() => {
     if (
-      humanSubmittedAnswer !== null &&
+      humanAnsweredCurrentClassroomRound &&
       currentRound?.status === 'ACTIVE' &&
       room.status === 'PLAYING'
     ) {
       const t = setTimeout(() => {
         setDemoState((prev) => resolveDemoRound(prev));
-      }, 950);
+      }, 5500);
       return () => clearTimeout(t);
     }
-  }, [humanSubmittedAnswer, currentRound?.status, room.status]);
+  }, [humanAnsweredCurrentClassroomRound, currentRound?.roundNumber, currentRound?.status, room.status]);
 
-  // Auto-advance to next round after short summary when nextRoundMode === 'AUTO'
+  // Auto-advance classroom bot round after short summary when nextRoundMode === 'AUTO'
   useEffect(() => {
     if (
       room.status === 'PLAYING' &&
@@ -93,7 +122,7 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
     ) {
       const t = setTimeout(() => {
         setDemoState((prev) => startDemoRound(prev, usedPromptsRef.current));
-      }, 3600);
+      }, 2800);
       return () => clearTimeout(t);
     }
   }, [room.status, room.settings.nextRoundMode, room.currentRound, room.settings.totalRounds, currentRound?.status]);
@@ -159,16 +188,21 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
     }));
   };
 
-  const handleHumanSubmit = (val: number) => {
-    setDemoState((prev) => ({
-      ...prev,
-      humanSubmittedAnswer: val,
-      humanSubmittedAtMs: Date.now(),
-    }));
+  const handleHumanSubmit = (roundNumber: number, val: number) => {
+    setDemoState((prev) =>
+      submitAndGradeDemoHumanAnswer(prev, roundNumber, val, usedPromptsRef.current)
+    );
   };
+
+  const handleHumanAdvance = () => {
+    setDemoState((prev) => advanceDemoHumanRound(prev));
+  };
+
+  const humanAnswerSubmission = getDemoHumanAnswerSubmission(demoState, humanCurrentRound);
 
   return (
     <div className="min-h-screen bg-slate-100">
+      <FunnyEventTicker players={players} rounds={rounds} />
       {/* Unmistakable DEMO MODE Banner */}
       <div className="bg-amber-400 text-slate-950 px-4 py-2 text-xs font-bold flex flex-wrap items-center justify-center gap-2">
         <AlertCircle className="w-4 h-4 shrink-0" />
@@ -186,7 +220,7 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
             </div>
             <div className="flex items-center gap-4 mt-0.5">
               <span className="font-display font-bold text-lg text-slate-900 font-math">
-                Ronde {room.currentRound} / {room.settings.totalRounds}
+                Ronde Kelas {room.currentRound} / {room.settings.totalRounds}
               </span>
               {currentRound?.status === 'ACTIVE' && (
                 <span className="inline-flex items-center gap-1 font-math font-bold text-sm text-amber-600">
@@ -212,7 +246,11 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
                   onClick={handlePauseResume}
                   className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-700 cursor-pointer"
                 >
-                  {room.status === 'PAUSED' ? <Play className="w-4 h-4 text-emerald-600" /> : <Pause className="w-4 h-4 text-amber-600" />}
+                  {room.status === 'PAUSED' ? (
+                    <Play className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <Pause className="w-4 h-4 text-amber-600" />
+                  )}
                   {room.status === 'PAUSED' ? 'Lanjutkan' : 'Jeda'}
                 </button>
 
@@ -222,7 +260,7 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
                     onClick={() => setDemoState((prev) => resolveDemoRound(prev))}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold cursor-pointer"
                   >
-                    Proses Ronde Sekarang
+                    Proses Ronde Bot Sekarang
                   </button>
                 )}
 
@@ -232,7 +270,7 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
                     onClick={() => setDemoState((prev) => startDemoRound(prev, usedPromptsRef.current))}
                     className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold cursor-pointer"
                   >
-                    <SkipForward className="w-4 h-4" /> Ronde Berikutnya
+                    <SkipForward className="w-4 h-4" /> Ronde Kelas Berikutnya
                   </button>
                 )}
 
@@ -311,8 +349,10 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
                 demoRoom={room}
                 demoPlayers={players}
                 demoRounds={rounds}
-                demoSubmittedAnswer={humanSubmittedAnswer}
+                demoHumanRound={humanCurrentRound}
+                demoMyAnswer={humanAnswerSubmission}
                 onDemoSubmitAnswer={handleHumanSubmit}
+                onDemoAdvanceRound={handleHumanAdvance}
                 onExitHome={onExitHome}
               />
             </div>
@@ -321,10 +361,21 @@ export const DemoModeWorkspace: React.FC<DemoModeWorkspaceProps> = ({
 
         <div className={`lg:col-span-8 space-y-5 ${mobileTab === 'BOARD' ? 'block' : 'hidden lg:block'}`}>
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
-            <GameBoard board={room.boardConfiguration} players={players} highlightPlayerId={DEMO_HUMAN_ID} />
+            <BoardRefreshToolbar
+              intervalSec={intervalSec}
+              onChangeInterval={setIntervalSec}
+              formattedTime={formattedTime}
+              justRefreshed={justRefreshed}
+              onRefreshNow={refreshNow}
+            />
+            <GameBoard
+              board={room.boardConfiguration}
+              players={displayedPlayers}
+              highlightPlayerId={DEMO_HUMAN_ID}
+            />
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <LeaderboardPanel players={players} highlightPlayerId={DEMO_HUMAN_ID} />
+            <LeaderboardPanel players={displayedPlayers} highlightPlayerId={DEMO_HUMAN_ID} />
             <RoundSummaryPanel summary={currentRound?.resultSummary} />
           </div>
         </div>

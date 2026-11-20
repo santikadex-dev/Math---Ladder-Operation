@@ -293,7 +293,7 @@ service cloud.firestore {
           && incoming().roomId == existing().roomId
           && incoming().startedAt == existing().startedAt
           && existing().status == 'ACTIVE'
-          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resultSummary']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['diceResults', 'questions', 'deadlineAt', 'status', 'resultSummary']);
 
         allow delete: if isValidRoomCode(roomId) && isValidId(roundId) && isRoomTeacher(roomId);
       }

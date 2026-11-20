@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Clock, LayoutGrid, ListOrdered, Sparkles } from 'lucide-react';
+import { ArrowLeft, Clock, LayoutGrid, ListOrdered, Music, Sparkles } from 'lucide-react';
+import { usePeriodicBoardRefresh } from '../hooks/usePeriodicBoardRefresh';
 import { subscribePlayers, subscribeRoom, subscribeRounds } from '../services/roomService';
 import type { Player, Room, Round } from '../types/game';
+import { getBgmMuted, setBgmMuted, startBgm, stopBgm } from '../utils/sound';
+import { BoardRefreshToolbar } from './BoardRefreshToolbar';
+import { FunnyEventTicker } from './FunnyEventTicker';
 import { GameBoard } from './GameBoard';
 import { LeaderboardPanel } from './LeaderboardPanel';
 import { RoundSummaryPanel } from './RoundSummaryPanel';
@@ -30,6 +34,16 @@ export const ProjectorBoardScreen: React.FC<ProjectorBoardScreenProps> = ({
   const [rounds, setRounds] = useState<Round[]>(initialRounds);
   const [tab, setTab] = useState<ProjectorTab>('FULL_BOARD');
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
+  const [bgmMutedState, setBgmMutedState] = useState<boolean>(() => getBgmMuted());
+
+  const {
+    displayedPlayers,
+    intervalSec,
+    setIntervalSec,
+    formattedTime,
+    justRefreshed,
+    refreshNow,
+  } = usePeriodicBoardRefresh(players, 3);
 
   useEffect(() => {
     if (isDemo) {
@@ -48,8 +62,28 @@ export const ProjectorBoardScreen: React.FC<ProjectorBoardScreenProps> = ({
     };
   }, [roomCode, isDemo, initialRoom, initialPlayers, initialRounds]);
 
-  const currentRound = rounds[rounds.length - 1] ?? null;
+  const currentRound =
+    (room && room.currentRound > 0 ? rounds.find((r) => r.roundNumber === room.currentRound) : null) ??
+    rounds[rounds.length - 1] ??
+    null;
   const lastResolved = [...rounds].reverse().find((r) => r.status === 'RESOLVED') ?? null;
+
+  useEffect(() => {
+    if (room?.status === 'PLAYING') {
+      startBgm();
+    } else {
+      stopBgm();
+    }
+    return () => {
+      stopBgm();
+    };
+  }, [room?.status]);
+
+  const handleToggleProjectorBgm = () => {
+    const next = !bgmMutedState;
+    setBgmMutedState(next);
+    setBgmMuted(next);
+  };
 
   useEffect(() => {
     const tick = () => {
@@ -80,6 +114,7 @@ export const ProjectorBoardScreen: React.FC<ProjectorBoardScreenProps> = ({
 
   return (
     <div className="min-h-screen bg-slate-950 text-white p-4 sm:p-6 flex flex-col">
+      <FunnyEventTicker players={players} rounds={rounds} topOffsetClass="top-2" />
       {/* Projector Header */}
       <header className="max-w-7xl w-full mx-auto flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800 mb-5">
         <div className="flex items-center gap-4">
@@ -100,7 +135,21 @@ export const ProjectorBoardScreen: React.FC<ProjectorBoardScreenProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleToggleProjectorBgm}
+            className={`px-3 py-2 rounded-xl border text-xs font-semibold inline-flex items-center gap-1.5 cursor-pointer transition-colors ${
+              bgmMutedState
+                ? 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                : 'bg-blue-600/20 border-blue-500/50 text-blue-300 hover:bg-blue-600/30'
+            }`}
+            title={bgmMutedState ? 'Nyalakan BGM' : 'Matikan BGM'}
+          >
+            <Music className="w-4 h-4" />
+            <span className="hidden md:inline">{bgmMutedState ? 'BGM Off' : 'BGM On'}</span>
+          </button>
+
           <div className="px-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-center">
             <div className="text-[11px] text-slate-400">Ronde</div>
             <div className="font-math text-xl font-bold text-white">
@@ -157,14 +206,22 @@ export const ProjectorBoardScreen: React.FC<ProjectorBoardScreenProps> = ({
       <main className="max-w-7xl w-full mx-auto flex-1">
         {tab === 'FULL_BOARD' && (
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-            <div className="xl:col-span-8">
-              <GameBoard board={room.boardConfiguration} players={players} darkTheme />
+            <div className="xl:col-span-8 bg-slate-900/60 rounded-2xl border border-slate-800 p-3 sm:p-4">
+              <BoardRefreshToolbar
+                intervalSec={intervalSec}
+                onChangeInterval={setIntervalSec}
+                formattedTime={formattedTime}
+                justRefreshed={justRefreshed}
+                onRefreshNow={refreshNow}
+                darkTheme
+              />
+              <GameBoard board={room.boardConfiguration} players={displayedPlayers} darkTheme />
             </div>
             <div className="xl:col-span-4 space-y-4">
               <div className="text-xs text-slate-400 font-medium">
                 Status: <strong className="text-white">{room.status}</strong> · {activeCount} Siswa Terhubung
               </div>
-              <LeaderboardPanel players={players} darkTheme maxRows={8} />
+              <LeaderboardPanel players={displayedPlayers} darkTheme maxRows={8} />
               <RoundSummaryPanel summary={lastResolved?.resultSummary} darkTheme />
             </div>
           </div>

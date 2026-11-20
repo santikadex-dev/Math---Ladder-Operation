@@ -28,6 +28,11 @@
   50% { transform: translateY(-8px) scale(1.12); }
 }
 
+@keyframes running-marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
 .animate-dice-tumble {
   animation: dice-tumble 0.45s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
@@ -36,9 +41,20 @@
   animation: token-hop 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: running-marquee 24s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-dice-tumble,
-  .animate-token-hop {
+  .animate-token-hop,
+  .animate-marquee {
     animation: none;
   }
 }

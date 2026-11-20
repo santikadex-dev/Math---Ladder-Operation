@@ -183,6 +183,26 @@ export function subscribeRoundAnswers(
   );
 }
 
+export function subscribeAllRoomAnswers(
+  roomCode: string,
+  teacherId: string,
+  onData: (answers: AnswerSubmission[]) => void
+): Unsubscribe {
+  const code = normalizeRoomCode(roomCode);
+  const path = `rooms/${code}/answers`;
+  const q = query(
+    collection(db, 'rooms', code, 'answers'),
+    where('teacherId', '==', teacherId)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      onData(snap.docs.map((d) => d.data() as AnswerSubmission));
+    },
+    (err) => handleFirestoreError(err, OperationType.LIST, path)
+  );
+}
+
 export function subscribeMyAnswer(
   roomCode: string,
   roundId: string,
@@ -384,11 +404,24 @@ export async function startNextRound(
     return nextRoundNumber;
   }
 
-  const diceResults: Record<string, number> = {};
-  const questions: Record<string, PublicQuestion> = {};
-  const secretAnswers: Record<string, SecretAnswerKey> = {};
+  const roundRef = doc(db, 'rooms', code, 'rounds', roundId);
+  const secretRef = doc(db, 'rooms', code, 'roundSecrets', roundId);
+  const [existingRoundSnap, existingSecretSnap] = await Promise.all([
+    getDoc(roundRef),
+    getDoc(secretRef),
+  ]);
+
+  const existingRound = existingRoundSnap.exists() ? (existingRoundSnap.data() as Round) : null;
+  const existingSecret = existingSecretSnap.exists() ? (existingSecretSnap.data() as RoundSecret) : null;
+
+  const diceResults: Record<string, number> = { ...(existingRound?.diceResults ?? {}) };
+  const questions: Record<string, PublicQuestion> = { ...(existingRound?.questions ?? {}) };
+  const secretAnswers: Record<string, SecretAnswerKey> = { ...(existingSecret?.answers ?? {}) };
 
   activePlayers.forEach((player, idx) => {
+    if (questions[player.playerId] && secretAnswers[player.playerId]) {
+      return;
+    }
     const dice = rollDice(room.settings.diceMode, player.doubleDiceNext);
     diceResults[player.playerId] = dice;
 
@@ -406,21 +439,37 @@ export async function startNextRound(
   const deadlineAt = Date.now() + room.settings.answerTimerSec * 1000;
   const batch = writeBatch(db);
 
-  batch.set(doc(db, 'rooms', code, 'rounds', roundId), {
-    roundNumber: nextRoundNumber,
-    roomId: code,
-    status: 'ACTIVE',
-    startedAt: serverTimestamp(),
-    deadlineAt,
-    diceResults,
-    questions,
-  });
+  if (existingRoundSnap.exists()) {
+    if (existingRound?.status === 'ACTIVE') {
+      batch.update(roundRef, {
+        deadlineAt,
+        diceResults,
+        questions,
+      });
+    }
+  } else {
+    batch.set(roundRef, {
+      roundNumber: nextRoundNumber,
+      roomId: code,
+      status: 'ACTIVE',
+      startedAt: serverTimestamp(),
+      deadlineAt,
+      diceResults,
+      questions,
+    });
+  }
 
-  batch.set(doc(db, 'rooms', code, 'roundSecrets', roundId), {
-    roundNumber: nextRoundNumber,
-    roomId: code,
-    answers: secretAnswers,
-  });
+  if (existingSecretSnap.exists()) {
+    batch.update(secretRef, {
+      answers: secretAnswers,
+    });
+  } else {
+    batch.set(secretRef, {
+      roundNumber: nextRoundNumber,
+      roomId: code,
+      answers: secretAnswers,
+    });
+  }
 
   const roomUpdate: Record<string, unknown> = {
     status: 'PLAYING',
@@ -464,6 +513,200 @@ export async function submitStudentAnswer(params: {
   }
 }
 
+export async function gradeSingleAnswer(params: {
+  room: Room;
+  round: Round;
+  player: Player;
+  submission: AnswerSubmission;
+  usedPrompts: Set<string>;
+}): Promise<void> {
+  const { room, round, player, submission, usedPrompts } = params;
+  if (submission.isCorrect !== undefined || player.finished || player.status === 'REMOVED') {
+    return;
+  }
+
+  const code = room.roomCode;
+  const roundId = submission.roundId;
+
+  let secretDoc: RoundSecret;
+  try {
+    const snap = await getDoc(doc(db, 'rooms', code, 'roundSecrets', roundId));
+    if (!snap.exists()) return;
+    secretDoc = snap.data() as RoundSecret;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.GET, `rooms/${code}/roundSecrets/${roundId}`);
+  }
+
+  const secret = secretDoc.answers[player.playerId];
+  if (!secret) return;
+
+  const dice = round.diceResults[player.playerId] ?? 1;
+  const roundStartMs =
+    round.startedAt instanceof Timestamp ? round.startedAt.toMillis() : Date.now() - 4000;
+  const submittedMs =
+    submission.submittedAt instanceof Timestamp ? submission.submittedAt.toMillis() : Date.now();
+  const responseTimeMs = Math.max(200, submittedMs - roundStartMs);
+  const isCorrect = submission.submittedAnswer === secret.correctAnswer;
+
+  const movement = resolveMovement({
+    currentPosition: player.position,
+    dice,
+    isCorrect,
+    isTimeout: false,
+    penalty: room.settings.wrongPenalty,
+    finishRule: room.settings.finishRule,
+    hasShield: player.shield,
+    board: room.boardConfiguration,
+    isChallengeRound: Boolean(secret.isChallenge),
+  });
+
+  const scoreDelta = calculatePlayerScore({
+    currentXp: player.xp,
+    currentGold: player.gold,
+    currentStreak: player.streak,
+    bestStreak: player.bestStreak,
+    correctAnswers: player.correctAnswers,
+    incorrectAnswers: player.incorrectAnswers,
+    timeoutCount: player.timeoutCount,
+    operationStats: player.operationStats,
+    negativeStats: player.negativeStats,
+    isCorrect,
+    isTimeout: false,
+    responseTimeMs,
+    operation: secret.operation,
+    hasNegative: secret.hasNegative,
+    specialTile: movement.specialTileTriggered,
+  });
+
+  const nextShield =
+    movement.specialTileTriggered === 'SHIELD'
+      ? true
+      : movement.shieldBlocked
+      ? false
+      : player.shield;
+
+  const nextDoubleDice = movement.specialTileTriggered === 'DOUBLE_DICE';
+
+  const playerUpdate: Record<string, unknown> = {
+    position: movement.finalPosition,
+    xp: scoreDelta.newXp,
+    level: scoreDelta.newLevel,
+    gold: scoreDelta.newGold,
+    correctAnswers: scoreDelta.newCorrect,
+    incorrectAnswers: scoreDelta.newIncorrect,
+    timeoutCount: scoreDelta.newTimeout,
+    streak: scoreDelta.newStreak,
+    bestStreak: scoreDelta.newBestStreak,
+    accuracy: scoreDelta.newAccuracy,
+    laddersClimbed: player.laddersClimbed + (movement.ladderTaken ? 1 : 0),
+    snakesEncountered: player.snakesEncountered + (movement.snakeTaken ? 1 : 0),
+    status: movement.finished ? 'FINISHED' : 'PLAYING',
+    finished: movement.finished,
+    shield: nextShield,
+    doubleDiceNext: nextDoubleDice,
+    operationStats: scoreDelta.newOperationStats,
+    negativeStats: scoreDelta.newNegativeStats,
+    lastOutcome: {
+      roundNumber: round.roundNumber,
+      dice,
+      submittedAnswer: submission.submittedAnswer,
+      correctAnswer: secret.correctAnswer,
+      isCorrect,
+      isTimeout: false,
+      fromPosition: movement.fromPosition,
+      toPosition: movement.finalPosition,
+      ...(movement.ladderTaken ? { ladderTo: movement.ladderTaken.end } : {}),
+      ...(movement.snakeTaken ? { snakeTo: movement.snakeTaken.end } : {}),
+      shieldBlocked: movement.shieldBlocked,
+      ...(movement.specialTileTriggered ? { specialTileTriggered: movement.specialTileTriggered } : {}),
+      xpEarned: scoreDelta.xpEarned,
+      goldEarned: scoreDelta.goldEarned,
+      message: movement.feedbackMessage,
+    },
+  };
+  if (movement.finished) {
+    playerUpdate.finishedRound = round.roundNumber;
+  }
+
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'rooms', code, 'answers', `${roundId}_${player.playerId}`), {
+    isCorrect,
+    correctAnswer: secret.correctAnswer,
+    responseTimeMs,
+  });
+  batch.update(doc(db, 'rooms', code, 'players', player.playerId), playerUpdate);
+
+  if (movement.finished && room.settings.gameEndRule === 'FIRST_FINISH') {
+    batch.update(doc(db, 'rooms', code), {
+      status: 'FINISHED',
+      finishedAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } else if (!movement.finished && round.roundNumber < room.settings.totalRounds) {
+    // Pre-generate the next round entry immediately so early finishers can proceed right away
+    const nextRoundNumber = round.roundNumber + 1;
+    const nextRoundId = `round_${nextRoundNumber}`;
+    const nextRoundRef = doc(db, 'rooms', code, 'rounds', nextRoundId);
+    const nextSecretRef = doc(db, 'rooms', code, 'roundSecrets', nextRoundId);
+    const [nextRoundSnap, nextSecretSnap] = await Promise.all([
+      getDoc(nextRoundRef),
+      getDoc(nextSecretRef),
+    ]);
+
+    const nextRoundData = nextRoundSnap.exists() ? (nextRoundSnap.data() as Round) : null;
+    if (!nextRoundSnap.exists() || nextRoundData?.status === 'ACTIVE') {
+      const alreadyHasQuestion = Boolean(nextRoundData?.questions?.[player.playerId]);
+      if (!alreadyHasQuestion) {
+        const nextDice = rollDice(room.settings.diceMode, nextDoubleDice);
+        const isChallenge =
+          room.boardConfiguration.specialTiles[String(movement.finalPosition)] === 'CHALLENGE';
+        const opHint = pickBalancedOperation(room.settings.operations, nextRoundNumber);
+        const { publicQuestion, secretKey } = generateQuestion(room.settings, {
+          operationHint: opHint,
+          usedPrompts,
+          isChallenge,
+        });
+
+        if (nextRoundSnap.exists()) {
+          batch.update(nextRoundRef, {
+            diceResults: { ...(nextRoundData?.diceResults ?? {}), [player.playerId]: nextDice },
+            questions: { ...(nextRoundData?.questions ?? {}), [player.playerId]: publicQuestion },
+          });
+        } else {
+          batch.set(nextRoundRef, {
+            roundNumber: nextRoundNumber,
+            roomId: code,
+            status: 'ACTIVE',
+            startedAt: serverTimestamp(),
+            deadlineAt: Date.now() + room.settings.answerTimerSec * 1000,
+            diceResults: { [player.playerId]: nextDice },
+            questions: { [player.playerId]: publicQuestion },
+          });
+        }
+
+        const existingSec = nextSecretSnap.exists() ? (nextSecretSnap.data() as RoundSecret) : null;
+        if (nextSecretSnap.exists()) {
+          batch.update(nextSecretRef, {
+            answers: { ...(existingSec?.answers ?? {}), [player.playerId]: secretKey },
+          });
+        } else {
+          batch.set(nextSecretRef, {
+            roundNumber: nextRoundNumber,
+            roomId: code,
+            answers: { [player.playerId]: secretKey },
+          });
+        }
+      }
+    }
+  }
+
+  try {
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `rooms/${code}/answers/${roundId}_${player.playerId}`);
+  }
+}
+
 export async function resolveCurrentRound(
   room: Room,
   round: Round,
@@ -501,17 +744,71 @@ export async function resolveCurrentRound(
   const events: RoundEvent[] = [];
 
   const batch = writeBatch(db);
-  const activePlayers = players.filter((p) => p.status !== 'REMOVED' && !p.finished);
+  const activePlayers = players.filter((p) => p.status !== 'REMOVED');
   let newFinisherOccurred = false;
   let allFinishedNow = true;
 
   for (const player of activePlayers) {
     const secret = secretDoc.answers[player.playerId];
     const dice = round.diceResults[player.playerId] ?? 1;
-    if (!secret) continue;
+    if (!secret) {
+      if (!player.finished) allFinishedNow = false;
+      continue;
+    }
 
     revealedAnswers[player.playerId] = secret.correctAnswer;
     const sub = answerMap.get(player.playerId);
+
+    // Skip mutating players who were already immediately graded for this round
+    if (sub && sub.isCorrect !== undefined) {
+      if (sub.isCorrect) correctCount++;
+      else incorrectCount++;
+      if (!player.finished) allFinishedNow = false;
+      else if (player.finishedRound === round.roundNumber) {
+        finishedCount++;
+        newFinisherOccurred = true;
+      }
+      if (player.lastOutcome?.roundNumber === round.roundNumber) {
+        if (player.lastOutcome.toPosition !== player.lastOutcome.fromPosition) movedCount++;
+        if (player.lastOutcome.ladderTo) laddersClimbedCount++;
+        if (player.lastOutcome.snakeTo) snakesSlidCount++;
+        if (player.lastOutcome.ladderTo) {
+          events.push({
+            id: `${roundId}_${player.playerId}_lad`,
+            playerId: player.playerId,
+            playerName: player.displayName,
+            avatar: player.avatar,
+            type: 'LADDER',
+            text: `${player.displayName} naik tangga ${player.lastOutcome.fromPosition} → ${player.lastOutcome.ladderTo}!`,
+            timestamp: Date.now(),
+          });
+        } else if (player.lastOutcome.snakeTo) {
+          events.push({
+            id: `${roundId}_${player.playerId}_snk`,
+            playerId: player.playerId,
+            playerName: player.displayName,
+            avatar: player.avatar,
+            type: 'SNAKE',
+            text: `${player.displayName} turun ular ${player.lastOutcome.fromPosition} → ${player.lastOutcome.snakeTo}`,
+            timestamp: Date.now(),
+          });
+        } else if (player.lastOutcome.toPosition > player.lastOutcome.fromPosition) {
+          events.push({
+            id: `${roundId}_${player.playerId}_mov`,
+            playerId: player.playerId,
+            playerName: player.displayName,
+            avatar: player.avatar,
+            type: 'MOVE',
+            text: `${player.displayName} maju ke petak ${player.lastOutcome.toPosition}`,
+            timestamp: Date.now(),
+          });
+        }
+      }
+      continue;
+    }
+
+    if (player.finished) continue;
+
     const isTimeout = !sub;
     const isCorrect = sub ? sub.submittedAnswer === secret.correctAnswer : false;
 
@@ -623,7 +920,6 @@ export async function resolveCurrentRound(
       });
     }
 
-    // Add concise feed events
     if (movement.finished) {
       events.push({
         id: `${roundId}_${player.playerId}_fin`,
@@ -695,7 +991,6 @@ export async function resolveCurrentRound(
     resultSummary: summary,
   });
 
-  // Evaluate game ending conditions
   const previouslyFinished = players.some((p) => p.status !== 'REMOVED' && p.finished);
   const reachedMaxRounds = round.roundNumber >= room.settings.totalRounds;
   const shouldEnd =

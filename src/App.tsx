@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { LogIn, LogOut, Volume2, VolumeX } from 'lucide-react';
+import { LogIn, LogOut, Music, Volume2, VolumeX } from 'lucide-react';
 import { DEFAULT_SETTINGS } from './constants/gameDefaults';
 import { DemoModeWorkspace } from './components/DemoModeWorkspace';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -14,7 +14,7 @@ import { generateBoardConfiguration } from './engine/boardEngine';
 import { auth, isFirebaseConfigured, signInWithGoogle, signOutUser } from './services/firebaseService';
 import { createRoom, normalizeRoomCode } from './services/roomService';
 import type { BoardConfiguration, GameSettings } from './types/game';
-import { setSoundMuted } from './utils/sound';
+import { setBgmMuted, setSoundMuted } from './utils/sound';
 
 type ScreenView =
   | { name: 'HOME' }
@@ -44,6 +44,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(!isFirebaseConfigured());
   const [muted, setMuted] = useState(false);
+  const [bgmMuted, setBgmMutedState] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [setupError, setSetupError] = useState<string | null>(null);
 
@@ -63,6 +64,12 @@ export default function App() {
     const next = !muted;
     setMuted(next);
     setSoundMuted(next);
+  };
+
+  const handleToggleBgmMute = () => {
+    const next = !bgmMuted;
+    setBgmMutedState(next);
+    setBgmMuted(next);
   };
 
   const handleTeacherSetupSubmit = async (
@@ -165,11 +172,27 @@ export default function App() {
               </button>
             </nav>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleToggleBgmMute}
+                aria-label={bgmMuted ? 'Nyalakan musik BGM' : 'Matikan musik BGM'}
+                title={bgmMuted ? 'BGM Dimatikan (Klik untuk nyalakan)' : 'BGM Menyala (Klik untuk mute)'}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                  bgmMuted || muted
+                    ? 'border-slate-200 bg-slate-100 text-slate-400'
+                    : 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                }`}
+              >
+                <Music className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{bgmMuted || muted ? 'BGM Off' : 'BGM On'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleToggleMute}
-                aria-label={muted ? 'Nyalakan suara' : 'Bisukan suara'}
+                aria-label={muted ? 'Nyalakan semua suara' : 'Bisukan semua suara'}
+                title={muted ? 'Suara dibisukan' : 'Bisukan semua suara'}
                 className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"
               >
                 {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}

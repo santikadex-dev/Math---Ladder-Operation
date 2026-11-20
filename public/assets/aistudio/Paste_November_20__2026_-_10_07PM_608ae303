@@ -1,0 +1,1363 @@
+# PROJECT: MATH LADDER — CLASS RACE
+## Multiplayer Integer Mathematics Classroom Game
+
+Build a complete, functional, responsive, real-time multiplayer educational web game called **Math Ladder: Class Race**.
+
+This application is a multiplayer digital snakes-and-ladders game designed for high school students to practice basic integer arithmetic operations. A teacher hosts a game room, students join using a room code, and all students play simultaneously in synchronized rounds.
+
+This must be a REAL FUNCTIONAL APPLICATION, not just a static mockup, UI concept, or simulated multiplayer experience.
+
+---
+
+# 1. CORE OBJECTIVE
+
+Create an enjoyable classroom multiplayer mathematics game that combines:
+
+- Classic snakes and ladders board game mechanics
+- Integer arithmetic practice
+- Real-time multiplayer synchronization
+- Simultaneous player turns
+- Teacher-controlled game settings
+- Automatic mathematical question generation
+- Live player movement
+- Classroom leaderboard
+- End-of-game statistics
+
+The game should be easy to understand for students, even when playing for the first time.
+
+Prioritize educational value, simplicity, fairness, responsiveness, and reliability.
+
+---
+
+# 2. TECHNOLOGY AND ARCHITECTURE
+
+Use the following technology stack when supported by the environment:
+
+- React
+- TypeScript
+- Vite
+- Responsive CSS
+- Firebase Authentication (optional or anonymous authentication)
+- Firebase Firestore for real-time multiplayer synchronization
+- Firebase security rules
+- Firebase App Check if practical
+- Cloud deployment compatible with the generated application
+
+Use Firebase Firestore for persistent multiplayer state.
+
+Do not simulate multiplayer using local React state, static players, fake timers, or hardcoded leaderboard data.
+
+Multiple students using different devices and browsers must be able to join the same room and see synchronized game states.
+
+If Firebase configuration is not available yet:
+
+1. Build the complete application architecture.
+2. Create a clearly isolated Firebase configuration file.
+3. Provide a setup screen or clear configuration instructions.
+4. Never pretend multiplayer is working when Firebase is disconnected.
+5. Use a local preview mode only when clearly labeled DEMO MODE.
+6. Keep the application ready for real Firebase integration.
+
+---
+
+# 3. VISUAL DESIGN
+
+Create a polished, modern, colorful board-game interface.
+
+Theme:
+- Fantasy adventure board game
+- Friendly, playful, and suitable for high school students
+- Professional game UI
+- Modern illustrated board
+- Smooth animations
+- Clear visual hierarchy
+- Not childish
+- Not overly cluttered
+
+Use:
+- Rich blue, purple, turquoise, orange, and gold accents
+- Rounded cards
+- Soft shadows
+- Subtle gradients
+- Illustrated snakes and ladders
+- Animated dice
+- Animated player tokens
+- Celebration animations
+- Smooth transitions
+- Clear feedback for correct and incorrect answers
+
+Use a responsive design that works well on:
+- Desktop computers
+- Projectors
+- Tablets
+- Smartphones
+
+Use different layouts for:
+- Teacher dashboard
+- Student game screen
+- Main board screen
+
+The teacher board should be optimized for landscape desktop and projector displays.
+
+Student question interface should be optimized for mobile portrait orientation.
+
+Avoid excessive scrolling on the student game screen.
+
+---
+
+# 4. USER ROLES
+
+Create two primary roles:
+
+## A. TEACHER / HOST
+
+Teacher can:
+
+- Create a game room
+- Configure mathematics operations
+- Configure number ranges
+- Configure game rules
+- Configure question difficulty
+- Configure number of rounds
+- Configure answer timer
+- Configure wrong-answer penalties
+- Configure snakes and ladders
+- Configure special tiles
+- Start the game
+- Pause the game
+- Resume the game
+- End the game
+- View all students in the room
+- Monitor student answer status
+- View the live game board
+- View leaderboard
+- View statistics
+- View final results
+
+## B. STUDENT / PLAYER
+
+Students can:
+
+- Join a room using a room code
+- Enter their display name
+- Choose an avatar
+- See the game lobby
+- Roll dice when allowed
+- Receive mathematics questions
+- Submit answers
+- See whether their answer is correct
+- See their pawn move
+- See snakes and ladders effects
+- View their position
+- View their score
+- View leaderboard
+- See the game result
+
+Students must not be able to modify game settings or manipulate other players' data.
+
+---
+
+# 5. ROOM SYSTEM
+
+Create a real multiplayer room system.
+
+Teacher creates a room.
+
+Generate a unique, easy-to-read room code such as:
+
+MATH-7K4P
+
+Students join using:
+
+- Room code
+- Display name
+- Avatar selection
+
+Room states:
+
+- WAITING
+- COUNTDOWN
+- PLAYING
+- PAUSED
+- FINISHED
+
+Room features:
+
+- Display room code prominently
+- Copy room code button
+- Share room link button
+- QR code for joining if feasible
+- Display number of connected players
+- Display player list
+- Display player connection status
+- Prevent duplicate display names in the same room
+- Allow teacher to remove a player from the room
+- Allow teacher to lock the lobby
+- Allow teacher to start the game when ready
+
+Create a lobby screen showing joined players.
+
+Students should see a message:
+
+"Menunggu guru memulai permainan..."
+
+When teacher starts the game, all connected students transition to the game screen automatically.
+
+---
+
+# 6. TEACHER GAME CONFIGURATION
+
+Create a game setup wizard with intuitive controls.
+
+## A. Mathematics Operations
+
+Allow teacher to select one or more operations:
+
+- Addition (+)
+- Subtraction (−)
+- Multiplication (×)
+- Division (÷)
+
+Allow multiple selections.
+
+Examples:
+
+- Addition only
+- Subtraction only
+- Addition and subtraction
+- Multiplication only
+- Mixed operations
+- All operations
+
+At least one operation must be selected.
+
+## B. Operand Range
+
+Allow teacher to configure the first and second operand independently.
+
+Operand A:
+- Minimum value
+- Maximum value
+
+Operand B:
+- Minimum value
+- Maximum value
+
+Default configuration:
+
+- Operand A: −20 to 20
+- Operand B: −20 to 20
+
+Allow negative integers.
+
+Do not confuse operand range with answer range.
+
+## C. Answer Constraints
+
+Allow optional settings:
+
+- Allow negative answers
+- Allow zero as an answer
+- Require integer answers
+- Restrict division to integer results
+- Avoid excessively large answers
+
+For division:
+
+Always generate valid integer division problems.
+
+Never generate division by zero.
+
+When integer division is selected, only generate dividend/divisor pairs whose quotient is an integer.
+
+Examples of valid questions:
+
+- −72 ÷ 9
+- 56 ÷ (−8)
+- −63 ÷ (−9)
+
+## D. Difficulty
+
+Provide three selectable levels:
+
+EASY:
+- Mostly positive numbers
+- Small values
+- Simple calculations
+- Limited negative numbers if enabled
+
+NORMAL:
+- Positive and negative integers
+- Moderate operand ranges
+- Mixed operations
+
+HARD:
+- Larger values
+- More challenging negative number combinations
+- More complex multiplication and division
+
+Difficulty must influence question generation, not just the visual label.
+
+## E. Game Settings
+
+Teacher can configure:
+
+- Number of rounds: 10, 15, 20, 30, 40, or custom
+- Answer timer: 5, 10, 15, 20, or 30 seconds
+- Wrong-answer penalty
+- Dice mode
+- Board size
+- Number of snakes
+- Number of ladders
+- Special tiles
+- Randomize board layout
+
+Wrong-answer penalty options:
+
+1. STAY:
+   Wrong answer means the player stays at their current position.
+
+2. BACK 1:
+   Wrong answer means the player moves backward 1 square.
+
+3. BACK 2:
+   Wrong answer means the player moves backward 2 squares.
+
+4. BACK 3:
+   Wrong answer means the player moves backward 3 squares.
+
+5. BACK BY DICE:
+   Wrong answer means the player moves backward by the dice result.
+
+Default penalty: STAY.
+
+Allow teacher to enable or disable snakes and ladders.
+
+Allow teacher to enable or disable bonus tiles.
+
+---
+
+# 7. BOARD GAME MECHANICS
+
+Create a classic 100-square snakes-and-ladders board.
+
+Board dimensions:
+
+- 10 rows
+- 10 columns
+- Square numbers 1–100
+- Zigzag numbering pattern
+
+The board should be visually attractive and easy to read.
+
+Start square: 1
+
+Finish square: 100
+
+Players use distinct colorful tokens.
+
+Suggested board tile types:
+
+- NORMAL
+- LADDER
+- SNAKE
+- BONUS
+- CHALLENGE
+
+Use visually distinctive icons for special tiles.
+
+The board should show:
+
+- Square numbers
+- Player tokens
+- Multiple tokens on the same square
+- Snakes
+- Ladders
+- Start
+- Finish
+- Special tiles
+
+If multiple players occupy the same square, show all tokens without hiding them.
+
+Use small token offsets, token stacking, or circular token groups.
+
+---
+
+# 8. SNAKES AND LADDERS
+
+Create balanced snakes and ladders.
+
+Example initial layout:
+
+LADDERS:
+
+- 4 → 14
+- 9 → 31
+- 20 → 38
+- 28 → 46
+- 40 → 59
+- 63 → 81
+- 71 → 91
+
+SNAKES:
+
+- 17 → 7
+- 34 → 19
+- 54 → 34
+- 62 → 43
+- 87 → 66
+- 95 → 72
+- 99 → 78
+
+These locations should be configurable and preferably randomized within balanced constraints for each game.
+
+Rules:
+
+- Landing on a ladder automatically moves the player upward.
+- Landing on a snake automatically moves the player downward.
+- A player must answer correctly to move based on the dice.
+- A wrong answer applies the configured penalty.
+- After applying the movement, check whether the destination is a snake, ladder, or special tile.
+- Prevent infinite chain movement.
+- Ensure the board layout is valid.
+- Never place a ladder destination below its starting point.
+- Never place a snake destination above its starting point.
+
+Create smooth pawn movement animations.
+
+Movement animations must be synchronized with the actual game state.
+
+---
+
+# 9. SIMULTANEOUS ROUND SYSTEM
+
+IMPORTANT: This game must use SIMULTANEOUS ROUNDS, not sequential turn-by-turn play.
+
+All players participate in each round at the same time.
+
+Round flow:
+
+STEP 1 — ROUND START
+
+- Teacher starts the round.
+- The system creates a round number.
+- All active players receive the round state.
+
+STEP 2 — DICE ROLL
+
+Each player rolls a virtual dice.
+
+Dice result is a random integer from 1 to 6.
+
+Dice results should be generated and validated by the trusted server or server-side logic.
+
+Do not allow students to manipulate dice results from client-side code.
+
+STEP 3 — QUESTION
+
+Each player receives a mathematics question.
+
+Questions may differ between players but must have equivalent difficulty.
+
+Display:
+
+- Current round
+- Dice result
+- Mathematics question
+- Answer input
+- Countdown timer
+
+STEP 4 — ANSWER
+
+Students submit answers.
+
+Each player can submit only one answer per round unless the teacher explicitly enables retry mode.
+
+Record:
+
+- Player ID
+- Round ID
+- Question
+- Correct answer
+- Submitted answer
+- Correct/incorrect status
+- Response time
+- Timestamp
+
+STEP 5 — ROUND DEADLINE
+
+When the timer expires:
+
+- Players who answered are processed.
+- Players who did not answer are marked TIMEOUT.
+- No further answers are accepted.
+- Resolve all movements.
+
+STEP 6 — MOVEMENT
+
+Correct answer:
+
+- Move forward according to dice result.
+
+Incorrect answer:
+
+- Apply teacher-configured penalty.
+
+Timeout:
+
+- Default: stay in place.
+
+STEP 7 — BOARD EFFECTS
+
+After normal movement:
+
+- Process ladder
+- Process snake
+- Process bonus tile
+- Process challenge tile
+
+STEP 8 — ROUND SUMMARY
+
+Show:
+
+- Correct answers
+- Incorrect answers
+- Timeout
+- Players who moved
+- Players who climbed ladders
+- Players who slid down snakes
+- Players who reached finish
+
+STEP 9 — NEXT ROUND
+
+Automatically transition to the next round when the round summary is completed.
+
+The teacher may also have a setting:
+
+- Automatic next round
+- Teacher-controlled next round
+
+Default: Automatic next round after a short summary.
+
+All clients must remain synchronized.
+
+---
+
+# 10. MATHEMATICS QUESTION GENERATOR
+
+Create a robust arithmetic question engine.
+
+Do not use AI API calls to generate questions during gameplay.
+
+Questions must be generated locally using deterministic mathematical algorithms.
+
+The system should generate:
+
+- Addition
+- Subtraction
+- Multiplication
+- Division
+
+Use integer operands.
+
+## ADDITION
+
+Examples:
+
+- 8 + 7
+- −12 + 5
+- −9 + (−6)
+- 18 + (−23)
+
+## SUBTRACTION
+
+Examples:
+
+- 14 − 8
+- −7 − 12
+- −15 − (−9)
+- 6 − (−18)
+
+## MULTIPLICATION
+
+Examples:
+
+- 7 × 8
+- −6 × 9
+- −8 × (−7)
+
+## DIVISION
+
+Examples:
+
+- 72 ÷ 8
+- −63 ÷ 9
+- 56 ÷ (−7)
+- −81 ÷ (−9)
+
+Requirements:
+
+- Never divide by zero.
+- Avoid invalid division results when integer-only mode is selected.
+- Avoid generating questions whose operands are outside the configured range.
+- Avoid answers outside the configured answer range if the teacher enables one.
+- Correctly handle negative values.
+- Correctly handle zero.
+- Correctly handle subtraction of negative numbers.
+- Correctly handle multiplication of negative numbers.
+- Correctly handle division of negative numbers.
+- Avoid duplicate questions within the same game when possible.
+- Balance the distribution of selected operations.
+- Do not let one operation dominate the question sequence unless intentionally selected.
+
+Display mathematical expressions clearly.
+
+Use proper mathematical symbols:
+
+- +
+- −
+- ×
+- ÷
+
+Use parentheses where necessary.
+
+---
+
+# 11. ANSWER MODE
+
+Provide two answer modes.
+
+## MULTIPLE CHOICE
+
+- Four answer options
+- Exactly one correct answer
+- Plausible distractors
+- Avoid duplicate options
+- Randomize correct answer position
+
+Distractors should be based on common arithmetic mistakes where possible.
+
+Example:
+
+Question:
+−12 + 19 = ?
+
+Options:
+
+A. −31
+B. 7
+C. −7
+D. 31
+
+## DIRECT INPUT
+
+- Students type the numerical answer.
+- Support negative integers.
+- Support zero.
+- Use a numeric keyboard on mobile devices.
+- Provide a clear submit button.
+- Avoid submitting empty answers.
+
+Teacher chooses:
+
+- Multiple Choice
+- Direct Input
+- Mixed Mode
+
+Default: Multiple Choice.
+
+---
+
+# 12. MOVEMENT RULES
+
+When the answer is correct:
+
+1. Take the player's current position.
+2. Add the dice result.
+3. Calculate the target position.
+4. Animate the pawn movement.
+5. Resolve ladder or snake.
+6. Resolve special tile.
+7. Update the player's final position.
+
+When the answer is incorrect:
+
+Apply the configured wrong-answer penalty.
+
+Do not apply dice movement when the answer is incorrect.
+
+Example:
+
+Current position = 24
+
+Dice = 5
+
+Correct answer:
+
+24 + 5 = 29
+
+Incorrect with BACK 2 penalty:
+
+24 − 2 = 22
+
+Incorrect with STAY:
+
+24
+
+Positions cannot be less than 1.
+
+## FINISH RULE
+
+Teacher can choose one of two finish rules:
+
+EXACT FINISH:
+The player must roll the exact number needed to reach square 100.
+
+OVERSHOOT ALLOWED:
+If the dice exceeds 100, the player reaches square 100.
+
+Default: EXACT FINISH.
+
+When a player reaches square 100:
+
+- Mark the player as FINISHED.
+- Show a victory animation.
+- Stop their participation in future rounds.
+- Continue the game for other players unless the teacher enables "End game when first player wins."
+
+Provide a configurable game ending:
+
+- End when first player finishes.
+- End when all players finish.
+- End after configured rounds.
+
+Default: End after configured rounds or when the teacher manually ends the game.
+
+---
+
+# 13. SPECIAL TILES
+
+Create optional special tiles.
+
+## BONUS TILE
+
+Reward the player with:
+
+- Bonus points
+- Gold
+- XP
+- Shield
+
+## CHALLENGE TILE
+
+The player receives an additional harder question.
+
+If correct:
+
+- Move forward 2 additional squares.
+
+If incorrect:
+
+- No additional movement.
+
+## DOUBLE DICE TILE
+
+The player receives another dice roll next round.
+
+## SHIELD TILE
+
+Protect the player from one snake or wrong-answer penalty.
+
+Teacher can enable or disable each tile type.
+
+Keep the game balanced.
+
+Do not let special tiles overpower mathematical performance.
+
+---
+
+# 14. PLAYER PROGRESSION
+
+Create a lightweight progression system.
+
+Each player has:
+
+- Avatar
+- Display name
+- Current position
+- XP
+- Level
+- Correct answers
+- Incorrect answers
+- Timeout count
+- Streak
+- Best streak
+- Accuracy
+- Gold
+- Optional shield
+
+XP rewards:
+
+- Correct answer: +10 XP
+- Fast correct answer: +5 bonus XP
+- Three consecutive correct answers: +10 combo bonus
+- Five consecutive correct answers: +20 combo bonus
+
+XP and gold are cosmetic rewards.
+
+Winning should primarily depend on:
+
+- Dice
+- Mathematical accuracy
+- Board position
+- Snakes and ladders
+- Strategy
+
+Do not create a pay-to-win system.
+
+---
+
+# 15. LIVE LEADERBOARD
+
+Create a live leaderboard visible to the teacher and students.
+
+Leaderboard should include:
+
+- Rank
+- Avatar
+- Name
+- Board position
+- Correct answers
+- Accuracy
+- XP
+- Streak
+- Finished status
+
+Leaderboard should update in real time.
+
+Use a fair ranking strategy.
+
+Primary ranking:
+
+1. Finished players rank above unfinished players.
+2. Among finished players, rank by finishing round.
+3. Among unfinished players, rank by board position.
+4. If board position is equal, use accuracy.
+5. If accuracy is equal, use correct answers.
+6. If all values are equal, use shared rank or deterministic tie-breaking.
+
+Avoid ranking only by response speed.
+
+Display a podium for the top three players after the game ends.
+
+---
+
+# 16. TEACHER DASHBOARD
+
+Create a professional teacher dashboard.
+
+Dashboard sections:
+
+## GAME SETUP
+
+- Operations
+- Operand ranges
+- Difficulty
+- Answer mode
+- Number of rounds
+- Answer timer
+- Wrong-answer penalty
+- Board settings
+- Special tiles
+- Finish rule
+
+## LOBBY
+
+- Room code
+- QR code
+- Number of students
+- Player list
+- Avatar
+- Connection status
+- Start game button
+
+## LIVE GAME
+
+- Main board
+- Current round
+- Countdown
+- Player count
+- Player positions
+- Answer status
+- Correct answers
+- Wrong answers
+- Timeouts
+- Live leaderboard
+
+Teacher controls:
+
+- Start game
+- Pause
+- Resume
+- Start next round
+- End game
+- Remove player
+- Lock room
+
+## RESULTS
+
+Display:
+
+- Winner
+- Top three players
+- Total questions answered
+- Class accuracy
+- Average response time
+- Operation-specific accuracy
+- Individual student results
+- Number of snakes encountered
+- Number of ladders climbed
+- Progress distribution
+
+Provide a downloadable CSV report for student results.
+
+---
+
+# 17. STUDENT INTERFACE
+
+Create a simple mobile-first student interface.
+
+Before joining:
+
+- Enter room code
+- Enter display name
+- Choose avatar
+- Join room
+
+Lobby:
+
+- Show selected avatar
+- Show display name
+- Show other players
+- Show room status
+- Show "Waiting for teacher"
+
+During game:
+
+- Show current round
+- Show dice result
+- Show question
+- Show timer
+- Show answer buttons or numeric input
+- Show submission feedback
+- Show movement animation
+- Show current board position
+- Show XP and streak
+- Show leaderboard button
+
+Do not display the correct answer to students before answer submission or round closure.
+
+Use clear feedback:
+
+CORRECT:
+"Benar! Kamu maju 4 langkah!"
+
+INCORRECT:
+"Belum tepat. Kamu tetap di posisi."
+
+TIMEOUT:
+"Waktu habis! Kamu tidak bergerak pada ronde ini."
+
+LADDER:
+"Hebat! Kamu menemukan tangga!"
+
+SNAKE:
+"Ups! Kamu terkena ular."
+
+Use encouraging feedback.
+
+Never shame students for incorrect answers.
+
+---
+
+# 18. MAIN BOARD SCREEN
+
+Create a dedicated board screen optimized for classroom projection.
+
+This screen should be viewable without login.
+
+It should display:
+
+- Room name
+- Round number
+- 10 × 10 game board
+- All player tokens
+- Snakes
+- Ladders
+- Special tiles
+- Live leaderboard
+- Countdown
+- Recent game events
+
+Allow teacher to switch between:
+
+- FULL BOARD
+- LEADERBOARD
+- ROUND SUMMARY
+
+The board screen must be visually readable from the back of the classroom.
+
+Use large numbers and clear player token colors.
+
+Avoid excessive tiny text.
+
+---
+
+# 19. END GAME AND RESULTS
+
+When the game ends, display a celebration screen.
+
+Include:
+
+- Champion
+- Top three players
+- Winner animation
+- Player final positions
+- Accuracy
+- XP
+- Correct answers
+- Incorrect answers
+- Timeout
+- Streak
+- Total rounds participated
+
+Create a class analytics panel.
+
+Teacher can identify:
+
+- Students with high accuracy
+- Students needing support
+- Operation with the lowest class accuracy
+- Students who struggle with negative numbers
+- Students who frequently time out
+
+Provide a button:
+
+"Play Again"
+
+Teacher can:
+
+- Reuse the previous settings
+- Reset the board
+- Generate a new board layout
+- Start a new room
+
+---
+
+# 20. FAIRNESS AND SECURITY
+
+Multiplayer game logic must be secure and fair.
+
+- Dice rolls must be trusted.
+- Correct answers must not be exposed to student clients before the round ends.
+- Students cannot change their own positions.
+- Students cannot change their scores.
+- Students cannot submit answers for another player.
+- Students cannot submit multiple answers in one round.
+- Validate room membership.
+- Validate game state.
+- Validate answer submissions.
+- Validate round IDs.
+- Prevent replay submissions.
+- Prevent unauthorized teacher actions.
+- Do not trust client-side timestamps for response-time ranking.
+- Use server-authoritative game state where practical.
+
+Use Firebase security rules to protect data.
+
+If a backend Cloud Function or trusted server is needed for secure dice generation, answer validation, movement, and scoring, implement it when supported.
+
+Do not expose Firebase secrets or service account credentials in frontend code.
+
+---
+
+# 21. DATA MODEL
+
+Create an appropriate Firestore structure.
+
+Suggested structure:
+
+rooms/{roomId}
+
+Fields:
+
+- roomCode
+- teacherId
+- status
+- settings
+- currentRound
+- createdAt
+- startedAt
+- finishedAt
+- boardConfiguration
+- locked
+- playerCount
+
+rooms/{roomId}/players/{playerId}
+
+Fields:
+
+- displayName
+- avatar
+- position
+- xp
+- level
+- gold
+- correctAnswers
+- incorrectAnswers
+- timeoutCount
+- streak
+- bestStreak
+- accuracy
+- status
+- connected
+- finished
+- joinedAt
+
+rooms/{roomId}/rounds/{roundId}
+
+Fields:
+
+- roundNumber
+- status
+- startedAt
+- deadline
+- questionData
+- diceResults
+- resultSummary
+
+rooms/{roomId}/answers/{answerId}
+
+Fields:
+
+- playerId
+- roundId
+- submittedAnswer
+- isCorrect
+- responseTime
+- submittedAt
+
+Optimize Firestore listeners.
+
+Avoid unnecessary high-frequency database writes.
+
+---
+
+# 22. GAME PERFORMANCE
+
+The application should support a typical classroom of approximately 30–40 students in one room.
+
+Optimize for:
+
+- Real-time synchronization
+- Low bandwidth
+- Mobile devices
+- Stable round transitions
+- Efficient Firestore listeners
+- Minimal unnecessary writes
+- Disconnection and reconnection
+- Duplicate submissions
+- Race conditions
+
+If a player disconnects:
+
+- Preserve their game state.
+- Allow them to reconnect using the same player session where possible.
+- Do not reset their position.
+- Do not duplicate their player record.
+
+If a player joins after the game starts:
+
+Teacher-controlled setting:
+
+- Reject late joiners
+- Allow late joiners to enter at square 1
+
+Default: Reject late joiners.
+
+---
+
+# 23. DEMO MODE
+
+Provide a DEMO MODE for development and preview.
+
+Demo mode should:
+
+- Clearly display "DEMO MODE"
+- Allow a teacher to preview the game
+- Use local simulated players
+- Simulate question generation
+- Simulate pawn movement
+- Simulate leaderboard
+- Allow testing settings
+
+DEMO MODE must be clearly separated from REAL MULTIPLAYER MODE.
+
+Never present simulated players as actual connected students.
+
+---
+
+# 24. APPLICATION NAVIGATION
+
+Create the following screens:
+
+1. Home Screen
+2. Teacher Game Setup
+3. Create Room
+4. Lobby
+5. Student Join Screen
+6. Student Lobby
+7. Student Game Screen
+8. Main Board Screen
+9. Live Leaderboard
+10. Round Summary
+11. Final Results
+12. Game History (if practical)
+
+Home screen:
+
+Title:
+
+MATH LADDER
+
+Subtitle:
+
+"Hitung, Melangkah, dan Raih Kemenangan!"
+
+Buttons:
+
+- BUAT GAME (GURU)
+- GABUNG GAME (SISWA)
+- DEMO MODE
+
+---
+
+# 25. IMPLEMENTATION REQUIREMENTS
+
+Build the application progressively but implement the core features fully.
+
+Prioritize this order:
+
+PHASE 1:
+- UI
+- Teacher setup
+- Board
+- Question generator
+- Dice
+- Player movement
+- Snakes and ladders
+- Demo mode
+
+PHASE 2:
+- Firebase configuration
+- Room creation
+- Joining room
+- Multiplayer synchronization
+- Simultaneous rounds
+- Live leaderboard
+
+PHASE 3:
+- Security rules
+- Reconnection
+- Result analytics
+- CSV export
+- Polish and animation
+
+Do not leave the core features as nonfunctional placeholders.
+
+If a feature cannot be fully implemented, clearly identify what remains unfinished.
+
+Use clean, modular architecture.
+
+Create separate modules for:
+
+- Game engine
+- Question generator
+- Dice logic
+- Movement logic
+- Board configuration
+- Multiplayer service
+- Firebase service
+- Room service
+- Answer validation
+- Scoring
+- Leaderboard
+- UI components
+
+Avoid putting the entire game in one React component.
+
+---
+
+# 26. FINAL ACCEPTANCE CRITERIA
+
+The application is considered successful only if:
+
+1. Teacher can create a game.
+2. Teacher can select operations.
+3. Teacher can configure operand ranges.
+4. Teacher can configure wrong-answer penalties.
+5. Teacher can configure game rounds.
+6. Teacher can configure answer timer.
+7. A student can join using a room code.
+8. Multiple students can join the same room.
+9. The game supports real multiplayer synchronization.
+10. Students roll dice.
+11. Students receive mathematics questions.
+12. Questions are generated correctly.
+13. Answers are validated correctly.
+14. Correct answers move the pawn according to the dice.
+15. Incorrect answers apply the configured penalty.
+16. Snakes and ladders work.
+17. Special tiles work if enabled.
+18. Multiple players can occupy the same square.
+19. The game runs using simultaneous rounds.
+20. Leaderboard updates correctly.
+21. Teacher can pause and resume.
+22. The game ends correctly.
+23. Results are displayed.
+24. Student statistics are available.
+25. The application is responsive on mobile and desktop.
+26. Demo mode is clearly separated from multiplayer.
+27. No fake multiplayer functionality is presented as real.
+28. No fake Firebase connection is presented as active.
+
+---
+
+# 27. DEVELOPMENT INSTRUCTIONS
+
+First inspect the available development environment.
+
+Then build the complete application.
+
+Do not respond with only a development plan.
+
+Do not stop after creating a landing page.
+
+Implement functional navigation, settings, game logic, question generation, dice, board movement, snakes and ladders, player state, and multiplayer architecture.
+
+Use sensible defaults.
+
+Prioritize a working game over decorative complexity.
+
+If Firebase configuration is needed, create a clearly documented configuration flow and explain exactly what is required to activate real multiplayer.
+
+At the end, provide a concise implementation summary listing:
+
+- Features completed
+- Features that work in demo mode
+- Features that work in real multiplayer mode
+- Firebase setup required
+- How to run the application
+- Known limitations
+
+Now begin building Math Ladder: Class Race.

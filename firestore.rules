@@ -1,0 +1,357 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net: default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable hardened primitives
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidRoomCode(code) {
+      return code is string && code.size() >= 4 && code.size() <= 16 && code.matches('^[A-Z0-9\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isRoomTeacher(roomId) {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherId == request.auth.uid;
+    }
+
+    // Validation Blueprint: Room
+    function isValidRoom(data, roomId) {
+      return data.keys().hasAll([
+          'roomCode', 'teacherId', 'teacherName', 'title', 'status',
+          'settings', 'boardConfiguration', 'currentRound', 'locked',
+          'playerCount', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'roomCode', 'teacherId', 'teacherName', 'title', 'status',
+          'settings', 'boardConfiguration', 'currentRound', 'locked',
+          'playerCount', 'createdAt', 'updatedAt', 'startedAt', 'finishedAt'
+        ])
+        && isValidRoomCode(data.roomCode)
+        && data.roomCode == roomId
+        && data.teacherId is string && data.teacherId.size() >= 1 && data.teacherId.size() <= 128
+        && data.teacherName is string && data.teacherName.size() >= 1 && data.teacherName.size() <= 80
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.status in ['WAITING', 'COUNTDOWN', 'PLAYING', 'PAUSED', 'FINISHED']
+        && data.settings is map
+        && data.boardConfiguration is map
+        && data.currentRound is int && data.currentRound >= 0 && data.currentRound <= 200
+        && data.locked is bool
+        && data.playerCount is int && data.playerCount >= 0 && data.playerCount <= 100
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Player
+    function isValidPlayer(data, roomId, playerId) {
+      return data.keys().hasAll([
+          'playerId', 'roomId', 'displayName', 'avatar', 'color',
+          'position', 'xp', 'level', 'gold', 'correctAnswers', 'incorrectAnswers',
+          'timeoutCount', 'streak', 'bestStreak', 'accuracy', 'laddersClimbed',
+          'snakesEncountered', 'status', 'connected', 'finished', 'shield',
+          'doubleDiceNext', 'joinedAt', 'lastSeenAt'
+        ])
+        && data.keys().hasOnly([
+          'playerId', 'roomId', 'displayName', 'avatar', 'color',
+          'position', 'xp', 'level', 'gold', 'correctAnswers', 'incorrectAnswers',
+          'timeoutCount', 'streak', 'bestStreak', 'accuracy', 'laddersClimbed',
+          'snakesEncountered', 'status', 'connected', 'finished', 'finishedRound',
+          'shield', 'doubleDiceNext', 'joinedAt', 'lastSeenAt', 'lastOutcome',
+          'operationStats', 'negativeStats'
+        ])
+        && data.playerId is string && data.playerId == playerId
+        && data.roomId is string && data.roomId == roomId
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 32
+        && data.avatar is string && data.avatar.size() >= 1 && data.avatar.size() <= 32
+        && data.color is string && data.color.size() >= 4 && data.color.size() <= 16
+        && data.position is int && data.position >= 1 && data.position <= 100
+        && data.xp is int && data.xp >= 0 && data.xp <= 1000000
+        && data.level is int && data.level >= 1 && data.level <= 1000
+        && data.gold is int && data.gold >= 0 && data.gold <= 1000000
+        && data.correctAnswers is int && data.correctAnswers >= 0 && data.correctAnswers <= 500
+        && data.incorrectAnswers is int && data.incorrectAnswers >= 0 && data.incorrectAnswers <= 500
+        && data.timeoutCount is int && data.timeoutCount >= 0 && data.timeoutCount <= 500
+        && data.streak is int && data.streak >= 0 && data.streak <= 500
+        && data.bestStreak is int && data.bestStreak >= 0 && data.bestStreak <= 500
+        && data.accuracy is number && data.accuracy >= 0 && data.accuracy <= 100
+        && data.laddersClimbed is int && data.laddersClimbed >= 0 && data.laddersClimbed <= 500
+        && data.snakesEncountered is int && data.snakesEncountered >= 0 && data.snakesEncountered <= 500
+        && data.status in ['READY', 'PLAYING', 'FINISHED', 'REMOVED']
+        && data.connected is bool
+        && data.finished is bool
+        && data.shield is bool
+        && data.doubleDiceNext is bool
+        && data.joinedAt is timestamp
+        && data.lastSeenAt is timestamp;
+    }
+
+    // Validation Blueprint: Round
+    function isValidRound(data, roomId) {
+      return data.keys().hasAll([
+          'roundNumber', 'roomId', 'status', 'startedAt', 'deadlineAt',
+          'diceResults', 'questions'
+        ])
+        && data.keys().hasOnly([
+          'roundNumber', 'roomId', 'status', 'startedAt', 'deadlineAt',
+          'diceResults', 'questions', 'resultSummary'
+        ])
+        && data.roundNumber is int && data.roundNumber >= 1 && data.roundNumber <= 200
+        && data.roomId is string && data.roomId == roomId
+        && data.status in ['ACTIVE', 'RESOLVED']
+        && data.startedAt is timestamp
+        && data.deadlineAt is int && data.deadlineAt > 0
+        && data.diceResults is map
+        && data.questions is map;
+    }
+
+    // Validation Blueprint: RoundSecret
+    function isValidRoundSecret(data, roomId) {
+      return data.keys().hasAll(['roundNumber', 'roomId', 'answers'])
+        && data.keys().hasOnly(['roundNumber', 'roomId', 'answers'])
+        && data.roundNumber is int && data.roundNumber >= 1 && data.roundNumber <= 200
+        && data.roomId is string && data.roomId == roomId
+        && data.answers is map;
+    }
+
+    // Validation Blueprint: Answer
+    function isValidAnswer(data, roomId) {
+      return data.keys().hasAll([
+          'playerId', 'teacherId', 'roomId', 'roundId', 'submittedAnswer', 'submittedAt'
+        ])
+        && data.keys().hasOnly([
+          'playerId', 'teacherId', 'roomId', 'roundId', 'submittedAnswer', 'submittedAt',
+          'isCorrect', 'correctAnswer', 'responseTimeMs'
+        ])
+        && isValidId(data.playerId)
+        && isValidId(data.teacherId)
+        && data.roomId is string && data.roomId == roomId
+        && isValidId(data.roundId)
+        && data.submittedAnswer is int && data.submittedAnswer >= -1000000 && data.submittedAnswer <= 1000000
+        && data.submittedAt is timestamp;
+    }
+
+    match /rooms/{roomId} {
+      // Single room lookup allowed by exact unguessable roomCode for student join & public projector board (contains no PII)
+      allow get: if isValidRoomCode(roomId);
+      // Teachers can list only their own hosted rooms for Game History
+      allow list: if isVerifiedUser() && resource.data.teacherId == request.auth.uid;
+
+      allow create: if isVerifiedUser()
+        && isValidRoomCode(roomId)
+        && isValidRoom(incoming(), roomId)
+        && incoming().teacherId == request.auth.uid
+        && incoming().status == 'WAITING'
+        && incoming().currentRound == 0
+        && incoming().playerCount == 0
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidRoomCode(roomId)
+        && isValidRoom(incoming(), roomId)
+        && existing().teacherId == request.auth.uid
+        && incoming().teacherId == existing().teacherId
+        && incoming().roomCode == existing().roomCode
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && existing().status != 'FINISHED'
+        && (
+          // Action: Update lobby settings or lock
+          incoming().diff(existing()).affectedKeys().hasOnly(['settings', 'boardConfiguration', 'locked', 'title', 'updatedAt'])
+          ||
+          // Action: Start / countdown / pause / resume / advance round
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentRound', 'startedAt', 'updatedAt'])
+          ||
+          // Action: Update player count
+          incoming().diff(existing()).affectedKeys().hasOnly(['playerCount', 'updatedAt'])
+          ||
+          // Action: Finish game
+          (incoming().status == 'FINISHED' && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'finishedAt', 'updatedAt']))
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidRoomCode(roomId)
+        && existing().teacherId == request.auth.uid;
+
+      match /players/{playerId} {
+        allow get: if isValidRoomCode(roomId) && isValidId(playerId);
+        // Projector & lobby player lists scoped strictly to the roomId
+        allow list: if resource.data.roomId == roomId;
+
+        allow create: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(playerId)
+          && playerId == request.auth.uid
+          && isValidPlayer(incoming(), roomId, playerId)
+          && incoming().position == 1
+          && incoming().xp == 0
+          && incoming().level == 1
+          && incoming().gold == 0
+          && incoming().correctAnswers == 0
+          && incoming().incorrectAnswers == 0
+          && incoming().timeoutCount == 0
+          && incoming().streak == 0
+          && incoming().bestStreak == 0
+          && incoming().accuracy == 0
+          && incoming().laddersClimbed == 0
+          && incoming().snakesEncountered == 0
+          && incoming().finished == false
+          && incoming().shield == false
+          && incoming().doubleDiceNext == false
+          && incoming().status == 'READY'
+          && incoming().joinedAt == request.time
+          && incoming().lastSeenAt == request.time
+          && exists(/databases/$(database)/documents/rooms/$(roomId))
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.locked == false
+          && (
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'WAITING'
+            || (
+              get(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'PLAYING'
+              && get(/databases/$(database)/documents/rooms/$(roomId)).data.settings.allowLateJoin == true
+            )
+          );
+
+        allow update: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(playerId)
+          && isValidPlayer(incoming(), roomId, playerId)
+          && incoming().playerId == existing().playerId
+          && incoming().roomId == existing().roomId
+          && incoming().joinedAt == existing().joinedAt
+          && (
+            // Tier 1: Teacher updates progression, status, position, rewards, or removes player
+            (
+              isRoomTeacher(roomId)
+              && get(/databases/$(database)/documents/rooms/$(roomId)).data.status != 'FINISHED'
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'position', 'xp', 'level', 'gold', 'correctAnswers', 'incorrectAnswers',
+                'timeoutCount', 'streak', 'bestStreak', 'accuracy', 'laddersClimbed',
+                'snakesEncountered', 'status', 'finished', 'finishedRound', 'shield',
+                'doubleDiceNext', 'lastSeenAt', 'lastOutcome', 'operationStats', 'negativeStats'
+              ])
+            )
+            ||
+            // Tier 2: Student updates only own connection heartbeat or avatar/name in WAITING lobby
+            (
+              playerId == request.auth.uid
+              && existing().status != 'REMOVED'
+              && (
+                (incoming().diff(existing()).affectedKeys().hasOnly(['connected', 'lastSeenAt'])
+                  && incoming().lastSeenAt == request.time)
+                ||
+                (
+                  get(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'WAITING'
+                  && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'color', 'lastSeenAt'])
+                  && incoming().lastSeenAt == request.time
+                )
+              )
+            )
+          );
+
+        allow delete: if isValidRoomCode(roomId) && isValidId(playerId) && isRoomTeacher(roomId);
+      }
+
+      match /rounds/{roundId} {
+        allow get: if isValidRoomCode(roomId) && isValidId(roundId);
+        allow list: if resource.data.roomId == roomId;
+
+        allow create: if isValidRoomCode(roomId)
+          && isValidId(roundId)
+          && isRoomTeacher(roomId)
+          && isValidRound(incoming(), roomId)
+          && incoming().status == 'ACTIVE'
+          && incoming().startedAt == request.time;
+
+        allow update: if isValidRoomCode(roomId)
+          && isValidId(roundId)
+          && isRoomTeacher(roomId)
+          && isValidRound(incoming(), roomId)
+          && incoming().roundNumber == existing().roundNumber
+          && incoming().roomId == existing().roomId
+          && incoming().startedAt == existing().startedAt
+          && existing().status == 'ACTIVE'
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'resultSummary']);
+
+        allow delete: if isValidRoomCode(roomId) && isValidId(roundId) && isRoomTeacher(roomId);
+      }
+
+      match /roundSecrets/{roundId} {
+        // Strictly teacher-only! Students can NEVER read unrevealed answer keys.
+        allow get: if isValidRoomCode(roomId) && isValidId(roundId) && isRoomTeacher(roomId);
+        allow list: if false;
+        allow create: if isValidRoomCode(roomId)
+          && isValidId(roundId)
+          && isRoomTeacher(roomId)
+          && isValidRoundSecret(incoming(), roomId);
+        allow update: if isValidRoomCode(roomId)
+          && isValidId(roundId)
+          && isRoomTeacher(roomId)
+          && isValidRoundSecret(incoming(), roomId)
+          && incoming().roundNumber == existing().roundNumber
+          && incoming().roomId == existing().roomId;
+        allow delete: if isValidRoomCode(roomId) && isValidId(roundId) && isRoomTeacher(roomId);
+      }
+
+      match /answers/{answerId} {
+        allow get: if isValidRoomCode(roomId) && isValidId(answerId)
+          && (isRoomTeacher(roomId) || (isSignedIn() && existing().playerId == request.auth.uid));
+        allow list: if isSignedIn() && (
+          resource.data.playerId == request.auth.uid
+          || resource.data.teacherId == request.auth.uid
+        );
+
+        allow create: if isVerifiedUser()
+          && isValidRoomCode(roomId)
+          && isValidId(answerId)
+          && isValidAnswer(incoming(), roomId)
+          && incoming().playerId == request.auth.uid
+          && incoming().teacherId == get(/databases/$(database)/documents/rooms/$(roomId)).data.teacherId
+          && answerId == (incoming().roundId + '_' + request.auth.uid)
+          && incoming().submittedAt == request.time
+          && !incoming().keys().hasAny(['isCorrect', 'correctAnswer', 'responseTimeMs'])
+          && exists(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid))
+          && get(/databases/$(database)/documents/rooms/$(roomId)/players/$(request.auth.uid)).data.status != 'REMOVED'
+          && exists(/databases/$(database)/documents/rooms/$(roomId)/rounds/$(incoming().roundId))
+          && get(/databases/$(database)/documents/rooms/$(roomId)/rounds/$(incoming().roundId)).data.status == 'ACTIVE';
+
+        // Only teacher can grade answers after submission
+        allow update: if isValidRoomCode(roomId)
+          && isValidId(answerId)
+          && isRoomTeacher(roomId)
+          && isValidAnswer(incoming(), roomId)
+          && incoming().playerId == existing().playerId
+          && incoming().teacherId == existing().teacherId
+          && incoming().roomId == existing().roomId
+          && incoming().roundId == existing().roundId
+          && incoming().submittedAnswer == existing().submittedAnswer
+          && incoming().submittedAt == existing().submittedAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['isCorrect', 'correctAnswer', 'responseTimeMs']);
+
+        allow delete: if isValidRoomCode(roomId) && isValidId(answerId) && isRoomTeacher(roomId);
+      }
+    }
+  }
+}

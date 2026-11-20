@@ -1,0 +1,211 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "A multiplayer Math Ladder classroom game room hosted by a teacher.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9\\-]+$",
+          "description": "Unique easy-to-read room code, also used as document ID."
+        },
+        "teacherId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Firebase Auth UID of the teacher hosting the room."
+        },
+        "teacherName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of the hosting teacher."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Classroom session title."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["WAITING", "COUNTDOWN", "PLAYING", "PAUSED", "FINISHED"],
+          "description": "Current room lifecycle state."
+        },
+        "settings": {
+          "type": "object",
+          "description": "Teacher-configured mathematics and board game rules."
+        },
+        "boardConfiguration": {
+          "type": "object",
+          "description": "Snakes, ladders, and special tile positions for the 10x10 board."
+        },
+        "currentRound": {
+          "type": "number",
+          "description": "Active round number (0 before game starts)."
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "Whether the teacher has locked the lobby against new joiners."
+        },
+        "playerCount": {
+          "type": "number",
+          "description": "Current number of active students in the room."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last room update timestamp."
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when game started."
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when game finished."
+        }
+      },
+      "required": ["roomCode", "teacherId", "teacherName", "title", "status", "settings", "boardConfiguration", "currentRound", "locked", "playerCount", "createdAt", "updatedAt"]
+    },
+    "Player": {
+      "title": "Player",
+      "description": "A student participant in a Math Ladder room.",
+      "type": "object",
+      "properties": {
+        "playerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "pattern": "^[A-Z0-9\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "avatar": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "color": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16
+        },
+        "position": { "type": "number" },
+        "xp": { "type": "number" },
+        "level": { "type": "number" },
+        "gold": { "type": "number" },
+        "correctAnswers": { "type": "number" },
+        "incorrectAnswers": { "type": "number" },
+        "timeoutCount": { "type": "number" },
+        "streak": { "type": "number" },
+        "bestStreak": { "type": "number" },
+        "accuracy": { "type": "number" },
+        "laddersClimbed": { "type": "number" },
+        "snakesEncountered": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": ["READY", "PLAYING", "FINISHED", "REMOVED"]
+        },
+        "connected": { "type": "boolean" },
+        "finished": { "type": "boolean" },
+        "finishedRound": { "type": "number" },
+        "shield": { "type": "boolean" },
+        "doubleDiceNext": { "type": "boolean" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "lastSeenAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "playerId", "roomId", "displayName", "avatar", "color",
+        "position", "xp", "level", "gold", "correctAnswers", "incorrectAnswers",
+        "timeoutCount", "streak", "bestStreak", "accuracy", "laddersClimbed",
+        "snakesEncountered", "status", "connected", "finished", "shield",
+        "doubleDiceNext", "joinedAt", "lastSeenAt"
+      ]
+    },
+    "Round": {
+      "title": "Round",
+      "description": "Simultaneous round state visible to room participants (excludes unrevealed answers).",
+      "type": "object",
+      "properties": {
+        "roundNumber": { "type": "number" },
+        "roomId": { "type": "string", "minLength": 4, "maxLength": 16, "pattern": "^[A-Z0-9\\-]+$" },
+        "status": { "type": "string", "enum": ["ACTIVE", "RESOLVED"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "deadlineAt": { "type": "number" },
+        "diceResults": { "type": "object" },
+        "questions": { "type": "object" },
+        "resultSummary": { "type": "object" }
+      },
+      "required": ["roundNumber", "roomId", "status", "startedAt", "deadlineAt", "diceResults", "questions"]
+    },
+    "RoundSecret": {
+      "title": "RoundSecret",
+      "description": "Teacher-only answer key for the round so students cannot read correct answers before resolution.",
+      "type": "object",
+      "properties": {
+        "roundNumber": { "type": "number" },
+        "roomId": { "type": "string", "minLength": 4, "maxLength": 16, "pattern": "^[A-Z0-9\\-]+$" },
+        "answers": { "type": "object" }
+      },
+      "required": ["roundNumber", "roomId", "answers"]
+    },
+    "Answer": {
+      "title": "Answer",
+      "description": "A student's single submitted answer for a specific round.",
+      "type": "object",
+      "properties": {
+        "playerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "teacherId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "roomId": { "type": "string", "minLength": 4, "maxLength": 16, "pattern": "^[A-Z0-9\\-]+$" },
+        "roundId": { "type": "string", "minLength": 1, "maxLength": 32, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "submittedAnswer": { "type": "number" },
+        "isCorrect": { "type": "boolean" },
+        "correctAnswer": { "type": "number" },
+        "responseTimeMs": { "type": "number" },
+        "submittedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["playerId", "teacherId", "roomId", "roundId", "submittedAnswer", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/Room" },
+      "description": "Game rooms keyed by unique roomCode."
+    },
+    "/rooms/{roomId}/players/{playerId}": {
+      "schema": { "$ref": "#/entities/Player" },
+      "description": "Students enrolled in the room, keyed by Firebase Auth UID."
+    },
+    "/rooms/{roomId}/rounds/{roundId}": {
+      "schema": { "$ref": "#/entities/Round" },
+      "description": "Simultaneous rounds with teacher-assigned dice and questions (no answer keys)."
+    },
+    "/rooms/{roomId}/roundSecrets/{roundId}": {
+      "schema": { "$ref": "#/entities/RoundSecret" },
+      "description": "Teacher-only answer keys for active rounds."
+    },
+    "/rooms/{roomId}/answers/{answerId}": {
+      "schema": { "$ref": "#/entities/Answer" },
+      "description": "Student answer submissions keyed deterministically as {roundId}_{playerId}."
+    }
+  }
+}

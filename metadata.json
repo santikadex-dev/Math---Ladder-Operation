@@ -1,0 +1,6 @@
+{
+  "name": "Math Ladder: Class Race",
+  "description": "Permainan papan ular tangga multipemain real-time berbasis kelas untuk melatih operasi bilangan bulat siswa SMA.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
